@@ -21,6 +21,9 @@ def _env_setup(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def s3_bucket():
     """Create a mocked S3 bucket for testing."""
+    from code_review_agent import diff_cache
+
+    diff_cache._client = None  # reset lazy singleton before moto context
     with mock_aws():
         client = boto3.client("s3", region_name="us-east-1")
         client.create_bucket(Bucket="test-diff-cache-bucket")

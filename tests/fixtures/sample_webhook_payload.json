@@ -1,0 +1,26 @@
+{
+  "action": "opened",
+  "repository": {
+    "id": 1296269,
+    "node_id": "MDEwOlJlcG9zaXRvcnkxMjk2MjY5",
+    "name": "Hello-World",
+    "full_name": "octocat/Hello-World",
+    "owner": {
+      "login": "octocat",
+      "id": 1,
+      "type": "User"
+    },
+    "private": false
+  },
+  "pull_request": {
+    "number": 1,
+    "title": "Update README with new welcome message",
+    "head": {
+      "sha": "abc123def456789012345678901234567890abcd",
+      "ref": "feature/readme-update"
+    },
+    "diff_url": "https://github.com/octocat/Hello-World/pull/1.diff",
+    "url": "https://api.github.com/repos/octocat/Hello-World/pulls/1",
+    "html_url": "https://github.com/octocat/Hello-World/pull/1"
+  }
+}

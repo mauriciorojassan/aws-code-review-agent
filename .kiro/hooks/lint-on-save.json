@@ -1,0 +1,14 @@
+{
+  "name": "lint-on-save",
+  "description": "Run ruff check and black format check on Python files when saved",
+  "trigger": {
+    "event": "file-save",
+    "pattern": "**/*.py"
+  },
+  "actions": [
+    {
+      "type": "shell",
+      "command": "ruff check --fix ${file} && black --check ${file}"
+    }
+  ]
+}

@@ -1,0 +1,100 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Code Review Agent — Automated PR reviewer powered by Bedrock Haiku
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Architectures:
+      - arm64
+    Timeout: 30
+    MemorySize: 256
+    Environment:
+      Variables:
+        DIFF_CACHE_BUCKET: !Ref DiffCacheBucket
+        SECRETS_ARN: !Ref GitHubSecrets
+        BEDROCK_MODEL_ID: anthropic.claude-3-haiku-20240307
+
+Parameters:
+  Stage:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+
+Resources:
+  # --- Lambda Function ---
+  ReviewFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub code-review-agent-${Stage}
+      Handler: code_review_agent.handler.lambda_handler
+      CodeUri: src/
+      Events:
+        Webhook:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ReviewApi
+            Path: /webhook
+            Method: POST
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref DiffCacheBucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource: "arn:aws:bedrock:*::foundation-model/anthropic.claude-3-haiku-20240307"
+        - Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Ref GitHubSecrets
+
+  # --- HTTP API ---
+  ReviewApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref Stage
+
+  # --- S3 Diff Cache ---
+  DiffCacheBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub code-review-agent-cache-${AWS::AccountId}-${Stage}
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireDiffs
+            Status: Enabled
+            ExpirationInDays: 7
+
+  # --- Secrets Manager ---
+  GitHubSecrets:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub code-review-agent/github-${Stage}
+      Description: GitHub App credentials for Code Review Agent
+
+  # --- CloudWatch Alarm: Bedrock invocations ---
+  BedrockInvocationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub code-review-agent-bedrock-invocations-${Stage}
+      AlarmDescription: Alert if Bedrock invocations exceed 100/day
+      Namespace: AWS/Bedrock
+      MetricName: Invocations
+      Statistic: Sum
+      Period: 86400
+      EvaluationPeriods: 1
+      Threshold: 100
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+Outputs:
+  WebhookUrl:
+    Description: URL for GitHub webhook configuration
+    Value: !Sub "https://${ReviewApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}/webhook"
+  DiffCacheBucketName:
+    Description: S3 bucket for diff caching
+    Value: !Ref DiffCacheBucket

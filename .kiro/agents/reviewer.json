@@ -1,0 +1,36 @@
+{
+  "name": "reviewer",
+  "description": "Code Review Agent — local reviewer that enforces cost governance, no hardcoded secrets, and runs tests before stopping.",
+  "prompt": "You are the Code Review Agent's local reviewer. Enforce: (1) Bedrock calls must use anthropic.claude-3-haiku only — no Sonnet/Opus unless explicitly approved. (2) No hardcoded AWS keys, GitHub tokens, or API keys in source — secrets come from Secrets Manager at runtime. (3) Public functions must have type hints. When in doubt, consult .kiro/steering/tech.md and the internal aws-cost-governance.md.",
+  "tools": ["read", "write", "shell"],
+  "allowedTools": ["read"],
+  "resources": [
+    "file://.kiro/steering/product.md",
+    "file://.kiro/steering/tech.md",
+    "file://.kiro/steering/structure.md",
+    "file://.kiro/steering/aws-cost-governance.md"
+  ],
+  "hooks": {
+    "preToolUse": [
+      {
+        "matcher": "fs_write",
+        "command": "sh -c 'f=$(cat | jq -r .tool_input.path // empty); if [ -n \"$f\" ] && grep -E \"anthropic\\\\.claude-3-(sonnet|opus)\" \"$f\" 2>/dev/null; then echo \"Blocked: only anthropic.claude-3-haiku is permitted per aws-cost-governance.md\" >&2; exit 2; fi'"
+      },
+      {
+        "matcher": "fs_write",
+        "command": "sh -c 'f=$(cat | jq -r .tool_input.path // empty); if [ -n \"$f\" ] && grep -E \"(AKIA[0-9A-Z]{16}|ghp_[a-zA-Z0-9]{36}|sk-[a-zA-Z0-9]{48})\" \"$f\" 2>/dev/null; then echo \"Blocked: hardcoded secret detected. Use Secrets Manager.\" >&2; exit 2; fi'"
+      }
+    ],
+    "postToolUse": [
+      {
+        "matcher": "fs_write",
+        "command": "sh -c 'f=$(cat | jq -r .tool_input.path // empty); [ -n \"$f\" ] && case \"$f\" in *.py) ruff check --fix \"$f\" >/dev/null 2>&1; black \"$f\" >/dev/null 2>&1 || true;; esac'"
+      }
+    ],
+    "stop": [
+      {
+        "command": "sh -c 'cd \"$(cat | jq -r .cwd // empty)\" && pytest -q 2>/dev/null; if [ $? -ne 0 ] && [ $? -ne 5 ]; then echo \"{\\\"decision\\\":\\\"block\\\",\\\"reason\\\":\\\"Tests are failing. Fix them before stopping.\\\"}\"; fi'"
+      }
+    ]
+  }
+}

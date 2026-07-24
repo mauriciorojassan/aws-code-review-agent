@@ -76,9 +76,9 @@ Transient failures (GitHub API errors, Bedrock timeouts) return non-2xx status c
 
 ### 2. Webhook Validator (`webhook_validator.py`)
 **Functions:**
-- `validate_signature(payload: bytes, signature: str, secret: str) -> bool` — HMAC-SHA256 validation.
-- `filter_event(headers: dict) -> tuple[bool, str]` — Returns `(should_process, reason)`. Only `X-GitHub-Event: pull_request` passes.
-- `filter_action(action: str) -> bool` — Only `opened` and `synchronize` pass.
+- `validate_signature(secret: bytes, payload: bytes, signature_header: str | None) -> bool` — GitHub HMAC-SHA256 signature check using `sha256=<hex>` header format. **Timing-safe invariant:** every code path computes the expected HMAC unconditionally and calls `hmac.compare_digest` exactly once. Returns `False` for any malformed input; never raises.
+- `filter_event(event_header: str | None) -> tuple[bool, str]` — Returns `(should_process, reason)`. Only `X-GitHub-Event: pull_request` passes (returns `(True, "pull_request")`); other values including `None` return `(False, "missing_event_header" | "ignored_event_type")`.
+- `filter_action(action: str | None) -> tuple[bool, str]` — Returns `(should_process, reason)`. Only `opened` and `synchronize` pass (returns `(True, action)`); other values including `None` and `""` return `(False, "missing_action" | "ignored_action")`.
 
 ### 3. Diff Cache (`diff_cache.py`)
 **Functions:**
@@ -86,35 +86,49 @@ Transient failures (GitHub API errors, Bedrock timeouts) return non-2xx status c
 - `put_diff(repo, pr, sha, diff_content) -> None`
 - `get_cached_analysis(repo, pr, sha) -> list[Finding] | None`
 - `put_analysis(repo, pr, sha, findings) -> None`
+- `get_s3_client() -> Any` — Returns the module-level S3 client (lazy-initialized once on first call; survives Lambda warm invocations).
+
+**Validators (applied at S3 key construction boundary — raise `ValueError` on bad input):**
+- `_validate_repo(repo: str) -> str` — matches `^[a-zA-Z0-9_][a-zA-Z0-9._-]*/[a-zA-Z0-9_][a-zA-Z0-9._-]*$`. Rejects `../evil` traversal via leading-dot prohibition while accepting all GitHub legal `owner/repo` names.
+- `_validate_sha(sha: str) -> str` — matches `^[0-9a-f]{40}$`.
+- `_validate_pr(pr: int) -> int` — rejects `pr <= 0`.
 
 **S3 key pattern:** `diffs/{repo}/{pr}/{sha}.diff`, `analyses/{repo}/{pr}/{sha}.json`
 
-**Behavior:** Bucket name resolved at call time from `DIFF_CACHE_BUCKET` env var; raises `RuntimeError` if unset.
+**Behavior:**
+- Bucket name resolved at call time from `DIFF_CACHE_BUCKET` env var; raises `RuntimeError` if unset.
+- `get_cached_diff` / `get_cached_analysis` catch `client.exceptions.NoSuchKey` → return `None` (silent cache miss). `get_cached_analysis` additionally catches `json.JSONDecodeError` and `pydantic.ValidationError` (stale cache entry → log warning, return `None`). Other `botocore.exceptions.ClientError` subclasses are logged at error level and return `None` (don't crash the Lambda).
+- `put_diff` / `put_analysis` swallow `ClientError` with warning log (best-effort PUT, no cache miss concept).
 
 ### 4. Diff Eligibility Filter (`diff_filter.py`)
 **Data class:**
 ```python
-@dataclass
+@dataclass(frozen=True, slots=True)
 class EligibleDiff:
-    content: str  # filtered diff content
-    excluded_files: list[str]
+    content: str                        # filtered diff content (sections preserved verbatim)
+    excluded_files: tuple[str, ...]     # sorted lexically for determinism
     excluded_count: int
     total_files: int
-    is_empty: bool
-    too_large: bool  # >50 eligible files
+    is_empty: bool                      # True if no eligible sections remain
+    too_large: bool                     # True if kept count > max_eligible_files (strict >); content is NOT truncated when too large
 ```
 
 **Function:**
-- `filter_diff(raw_diff: str) -> EligibleDiff`
+- `filter_diff(diff: str, max_eligible_files: int = 50) -> EligibleDiff`
 
-**Denylist:** `*.lock`, `*.min.*`, `package-lock.json`, `yarn.lock`, `poetry.lock`, `Cargo.lock`. Binary files identified by MIME type or GitHub diff metadata (`Binary files differ`) are also excluded.
+**Denylist (matches basenames only):**
+- `package-lock.json`, `yarn.lock`, `poetry.lock`, `Cargo.lock` — exact match.
+- `.*\.lock` — globs all other lockfiles (`composer.lock`, `Gemfile.lock`, `.lock`, etc.).
+- `.*\.min\..*` — globs minified assets (`vendor.min.js`, `styles.min.css`, `.min.js` dotfile-prefixed).
+
+**Binary detection heuristic:** Treats a file section as binary if it contains a NUL byte (`\x00`) or fails to encode as UTF-8 (lone-surrogate detection). Does NOT rely on MIME type or `Binary files differ` lines.
 
 **Logic:**
-1. Parse unified diff into file entries.
-2. For each file, check against denylist and binary detection.
-3. Retain eligible files in output diff.
-4. Set `too_large = True` if eligible count > 50.
-5. Set `is_empty = True` if eligible count == 0.
+1. Parse the unified diff by finding `diff --git a/<path> b/<path>` section headers via `_HEADER_RE` regex with alternation: quoted paths (`"path with spaces"` with `""` escape for embedded quotes) OR unquoted (`\S+`). `_unescape_git_path` strips outer quotes and unescapes `""` → `"` for basename extraction. Quoted paths are preserved verbatim in output content.
+2. Per section: extract basename from `b/<path>` (unescaped). Apply denylist regex. If not denylisted, scan section bytes for NUL / UTF-8 encode failure. Excluded files (denylisted OR binary) are added to `excluded_files` (sorted lexically at return).
+3. Concatenate kept sections in original order → `content`. Empty input or non-diff string returns an empty `EligibleDiff` (does not raise).
+4. `too_large = (kept_count > max_eligible_files)` — strict `>`. `content` is NOT truncated when `too_large` (handler decides what to do).
+5. `is_empty = (kept_count == 0)`. Note: `is_empty=True` with `total_files>0` means "all files were filtered"; `is_empty=True` with `total_files=0` means "no diff sections detected".
 
 ### 5. Diff Parser and Hunk Validator (`diff_parser.py`)
 **Data class:**
@@ -244,6 +258,8 @@ class ReviewResult(BaseModel):
     findings: list[Finding]
     cached: bool = False
 ```
+
+**`extra="ignore"` trade-off:** `WebhookPayload.ConfigDict(extra="ignore")` is intentional and accepted risk in v1. GitHub sometimes adds new fields to webhook payloads without bumping the schema version; a strict `extra="forbid"` parser would break on every schema drift, taking down the reviewer silently. The trade-off is that we silently drop unknown fields. To mitigate: when a new finding-via-integration-test cycle shows a regression expected from a new GitHub field, escalate to a schema-pin policy and consider switching to a strict mode with pinned payloads per schema version.
 
 ### 10. MCP Server (`mcp_server/server.py`)
 **Transport:** stdio

@@ -65,6 +65,17 @@ def test_missing_prefix_returns_false() -> None:
     assert validate_signature(_SECRET, _PAYLOAD, digest) is False
 
 
+def test_none_header_returns_false_without_raising() -> None:
+    """Regression: None header must return False via compare_digest, not early-return."""
+    # This test verifies the invariant holds; it does not measure timing.
+    assert validate_signature(_SECRET, _PAYLOAD, None) is False
+    # The function must not raise on any of these:
+    assert validate_signature(_SECRET, _PAYLOAD, "") is False
+    assert validate_signature(_SECRET, _PAYLOAD, "garbage") is False
+    assert validate_signature(_SECRET, _PAYLOAD, "sha256=") is False
+    assert validate_signature(_SECRET, _PAYLOAD, "v1=deadbeef") is False
+
+
 # --- filter_event ---------------------------------------------------------
 
 

@@ -12,14 +12,15 @@ _ALLOWED_ACTIONS = frozenset({"opened", "synchronize"})
 def validate_signature(secret: bytes, payload: bytes, signature_header: str | None) -> bool:
     """Return True iff the header carries a valid GitHub HMAC-SHA256 signature.
 
-    Expected header format: ``sha256=<hex-digest>``. Returns False for any
-    malformed input; never raises.
+    Timing-safe: every code path computes the expected HMAC and calls
+    ``hmac.compare_digest`` exactly once. Returns False for any malformed
+    input; never raises.
     """
-    if signature_header is None or not signature_header.startswith(_SIGNATURE_PREFIX):
-        return False
-
-    provided_hex = signature_header[len(_SIGNATURE_PREFIX) :]
     expected_hex = hmac.new(secret, payload, hashlib.sha256).hexdigest()
+    if signature_header is not None and signature_header.startswith(_SIGNATURE_PREFIX):
+        provided_hex = signature_header[len(_SIGNATURE_PREFIX) :]
+    else:
+        provided_hex = ""
     return hmac.compare_digest(expected_hex, provided_hex)
 
 

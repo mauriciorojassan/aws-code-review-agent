@@ -80,8 +80,8 @@ def get_cached_diff(repo: str, pr: int, sha: str) -> str | None:
     pr = _validate_pr(pr)
     sha = _validate_sha(sha)
     key = _diff_key(repo, pr, sha)
+    client = get_s3_client()
     try:
-        client = get_s3_client()
         response = client.get_object(Bucket=_bucket_name(), Key=key)
         return response["Body"].read().decode("utf-8")
     except client.exceptions.NoSuchKey:
@@ -97,8 +97,8 @@ def put_diff(repo: str, pr: int, sha: str, diff_content: str) -> None:
     pr = _validate_pr(pr)
     sha = _validate_sha(sha)
     key = _diff_key(repo, pr, sha)
+    client = get_s3_client()
     try:
-        client = get_s3_client()
         client.put_object(
             Bucket=_bucket_name(),
             Key=key,
@@ -119,8 +119,8 @@ def get_cached_analysis(repo: str, pr: int, sha: str) -> list[Finding] | None:
     pr = _validate_pr(pr)
     sha = _validate_sha(sha)
     key = _analysis_key(repo, pr, sha)
+    client = get_s3_client()
     try:
-        client = get_s3_client()
         obj = client.get_object(Bucket=_bucket_name(), Key=key)
         body = obj["Body"].read().decode("utf-8")
         data = json.loads(body)
@@ -141,8 +141,8 @@ def put_analysis(repo: str, pr: int, sha: str, findings: list[Finding]) -> None:
     pr = _validate_pr(pr)
     sha = _validate_sha(sha)
     key = _analysis_key(repo, pr, sha)
+    client = get_s3_client()
     try:
-        client = get_s3_client()
         client.put_object(
             Bucket=_bucket_name(),
             Key=key,

@@ -99,6 +99,7 @@ Transient failures (GitHub API errors, Bedrock timeouts) return non-2xx status c
 - Bucket name resolved at call time from `DIFF_CACHE_BUCKET` env var; raises `RuntimeError` if unset.
 - `get_cached_diff` / `get_cached_analysis` catch `client.exceptions.NoSuchKey` → return `None` (silent cache miss). `get_cached_analysis` additionally catches `json.JSONDecodeError` and `pydantic.ValidationError` (stale cache entry → log warning, return `None`). Other `botocore.exceptions.ClientError` subclasses are logged at error level and return `None` (don't crash the Lambda).
 - `put_diff` / `put_analysis` swallow `ClientError` with warning log (best-effort PUT, no cache miss concept).
+- `_bucket_name()` raises `RuntimeError` if `DIFF_CACHE_BUCKET` env var is unset. This is intended **fail-loud** behavior for deploy misconfiguration — a Lambda cold start with missing env indicates an infrastructure problem that requires operator intervention, not a transient S3 fault. The handler (`handler.py`) MUST NOT catch this error.
 
 ### 4. Diff Eligibility Filter (`diff_filter.py`)
 **Data class:**

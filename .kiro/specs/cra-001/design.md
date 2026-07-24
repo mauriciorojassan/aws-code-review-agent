@@ -210,22 +210,39 @@ class Finding(BaseModel):
     message: str
     suggestion: str | None = None
 
-class WebhookPayload(BaseModel):
-    action: str
-    number: int
-    repository: RepoInfo
-    pull_request: PRInfo
+
+class OwnerInfo(BaseModel):
+    login: str
+
+
+class HeadInfo(BaseModel):
+    sha: str
+    ref: str | None = None
+
 
 class RepoInfo(BaseModel):
     full_name: str
-    owner: str
     name: str
+    owner: OwnerInfo
+
 
 class PRInfo(BaseModel):
     number: int
-    head_sha: str
     title: str
-    diff_url: str
+    head: HeadInfo
+    diff_url: str | None = None
+
+
+class WebhookPayload(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    action: str
+    repository: RepoInfo
+    pull_request: PRInfo
+
+
+class ReviewResult(BaseModel):
+    findings: list[Finding]
+    cached: bool = False
 ```
 
 ### 10. MCP Server (`mcp_server/server.py`)

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from moto import mock_aws
-
 from code_review_agent.diff_cache import (
     get_cached_analysis,
     get_cached_diff,
@@ -13,7 +11,6 @@ from code_review_agent.diff_cache import (
 from code_review_agent.models import Finding
 
 
-@mock_aws
 def test_put_and_get_diff(s3_bucket, sample_diff: str) -> None:
     """Test storing and retrieving a diff from cache."""
     put_diff("owner/repo", 42, "abc123", sample_diff)
@@ -21,14 +18,12 @@ def test_put_and_get_diff(s3_bucket, sample_diff: str) -> None:
     assert result == sample_diff
 
 
-@mock_aws
 def test_get_diff_cache_miss(s3_bucket) -> None:
     """Test that cache miss returns None."""
     result = get_cached_diff("owner/repo", 99, "missing")
     assert result is None
 
 
-@mock_aws
 def test_put_and_get_analysis(s3_bucket) -> None:
     """Test storing and retrieving analysis findings."""
     findings = [
@@ -48,7 +43,6 @@ def test_put_and_get_analysis(s3_bucket) -> None:
     assert result[0].severity == "warning"
 
 
-@mock_aws
 def test_get_analysis_cache_miss(s3_bucket) -> None:
     """Test that analysis cache miss returns None."""
     result = get_cached_analysis("owner/repo", 99, "missing")

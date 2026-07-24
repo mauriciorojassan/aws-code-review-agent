@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 import boto3
 import pytest
 from moto import mock_aws
@@ -44,7 +42,7 @@ index 1234567..abcdefg 100644
 -    print("hello")
 +    print("hello world")
      return 0
-"""
+"""  # noqa: W293
 
 
 @pytest.fixture

@@ -5,13 +5,14 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-_HEADER_RE = re.compile(r"^diff --git a/(\S+) b/(\S+)", re.MULTILINE)
+_PATH = r'(?:"(?:""|[^"])*"|\S+)'
+_HEADER_RE = re.compile(rf"^diff --git a/({_PATH}) b/({_PATH})", re.MULTILINE)
 
 # Denylist matches basenames only.
 #   - package-lock.json (exact match)
-#   - anything ending in .lock (yarn.lock, poetry.lock, Cargo.lock, composer.lock, ...)
-#   - anything containing .min. as a full extension (vendor.min.js, styles.min.css, ...)
-_DENYLIST_RE = re.compile(r"^(package-lock\.json|.+\.lock|.+\.min\..+)$")
+#   - anything ending in .lock (yarn.lock, poetry.lock, Cargo.lock, composer.lock, .lock, ...)
+#   - anything containing .min. as an extension (vendor.min.js, styles.min.css, .min.js, ...)
+_DENYLIST_RE = re.compile(r"^(package-lock\.json|.*\.lock|.*\.min\..*)$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +41,13 @@ def _basename(path: str) -> str:
     return path.rsplit("/", 1)[-1]
 
 
+def _unescape_git_path(path: str) -> str:
+    """Unquote a Git-quoted path. ``"foo""bar"`` → ``foo"bar``."""
+    if len(path) >= 2 and path.startswith('"') and path.endswith('"'):
+        return path[1:-1].replace('""', '"')
+    return path
+
+
 def _is_denylisted(basename: str) -> bool:
     return _DENYLIST_RE.match(basename) is not None
 
@@ -54,7 +62,7 @@ def _is_binary_content(section: str) -> bool:
         return True
     try:
         section.encode("utf-8")
-    except (UnicodeEncodeError, UnicodeDecodeError):
+    except UnicodeEncodeError:
         return True
     return False
 
@@ -81,7 +89,7 @@ def filter_diff(diff: str, max_eligible_files: int = 50) -> EligibleDiff:
         start = match.start()
         end = matches[index + 1].start() if index + 1 < len(matches) else len(diff)
         section = diff[start:end]
-        basename = _basename(match.group(2))
+        basename = _basename(_unescape_git_path(match.group(2)))
 
         if _is_denylisted(basename):
             excluded.append(basename)

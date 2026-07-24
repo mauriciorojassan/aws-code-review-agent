@@ -94,6 +94,23 @@ def test_lock_infix_but_not_extension_kept() -> None:
     assert "my-document.lock.md" in result.content
 
 
+def test_dotfile_minified_excluded() -> None:
+    result = filter_diff(_section(".min.js"))
+    assert result.excluded_files == (".min.js",)
+    assert result.is_empty is True
+
+
+def test_middle_min_excluded() -> None:
+    result = filter_diff(_section("my.file.min.txt"))
+    assert result.excluded_files == ("my.file.min.txt",)
+
+
+def test_styles_min_css_regression() -> None:
+    # Regression: existing behavior after broadening .*\.min\..* still holds.
+    result = filter_diff(_section("styles.min.css"))
+    assert result.excluded_files == ("styles.min.css",)
+
+
 # --- Binary detection -----------------------------------------------------
 
 
@@ -258,3 +275,36 @@ def test_excluded_files_are_sorted_lexically() -> None:
     assert result.total_files == 5
     assert result.excluded_count == 4
     assert "keep.py" in result.content
+
+
+# --- Git-quoted paths -----------------------------------------------------
+
+
+def test_path_with_spaces_kept() -> None:
+    diff = (
+        'diff --git a/"name with spaces.py" b/"name with spaces.py"\n'
+        "--- a/x\n+++ b/x\n@@ -1,1 +1,1 @@\n-a\n+b\n"
+    )
+    result = filter_diff(diff)
+    assert result.total_files == 1
+    assert result.excluded_count == 0
+    assert result.is_empty is False
+
+
+def test_path_with_embedded_quotes_kept() -> None:
+    # Git escapes a literal " inside a quoted path as "".
+    diff = (
+        'diff --git a/"name""with""quotes.py" b/"name""with""quotes.py"\n'
+        "--- a/x\n+++ b/x\n@@ -1,1 +1,1 @@\n-a\n+b\n"
+    )
+    result = filter_diff(diff)
+    assert result.total_files == 1
+    assert result.excluded_count == 0
+
+
+def test_unquoted_path_regression() -> None:
+    # Regression: paths without spaces or quotes still parse correctly.
+    diff = _section("plain.py")
+    result = filter_diff(diff)
+    assert result.total_files == 1
+    assert result.excluded_count == 0

@@ -27,7 +27,7 @@
 - **ruff** — linter with `E, F, I, N, W, UP, S, B, A, C4, PT` rule sets enabled.
 - **black** — formatter, `line-length=100`, `target-version=py312`.
 - **GitHub Actions** — `.github/workflows/ci.yml` runs the same gate on every push + PR to `main`: ruff, black --check, pytest with `--cov=code_review_agent --cov-fail-under=98`, `sam validate --lint`, `sam build`. Python 3.12 only. Concurrency cancellation and pip caching keyed on `pyproject.toml` + both `requirements.txt` files. The 98% floor is set below the current 98.56% src total to leave room for tiny refactors while catching real regressions.
-- Test-suite gate (local, before every commit): `pytest --cov` + `ruff check` + `black --check` + `sam validate --lint`.
+- Test-suite gate (local, before every commit): `pytest --cov` + `ruff check` + `black --check` + `sam validate --lint` + `sam build`. The final `sam build` step catches `src/requirements.txt` drift against `pyproject.toml` — added to both CI and the local gate in JD Round 1 to prevent silent runtime-dep divergence.
 
 ## Key Libraries
 - `boto3` — AWS SDK (S3, Bedrock Runtime, CloudWatch).
@@ -49,12 +49,13 @@
 # Install dev dependencies (editable + optional dev group)
 pip install -e ".[dev]"
 
-# Run the full gate — matches CI
+# Run the full gate — matches CI exactly
 pytest --cov=code_review_agent --cov-fail-under=98
 ruff check src/ tests/ mcp_server/
 black --check src/ tests/ mcp_server/
 sam validate --lint
+sam build --use-container=false   # verifies src/requirements.txt resolves
 ```
 
-For end-to-end smoke tests (direct-Python + `sam build` + `sam local invoke`),
-see `docs/smoke-test.md`. For AWS deployment, see `docs/deployment.md`.
+For end-to-end smoke tests (direct-Python + `sam local invoke`), see
+`docs/smoke-test.md`. For AWS deployment, see `docs/deployment.md`.

@@ -56,3 +56,13 @@ jobs:
 
       - name: SAM template validation
         run: sam validate --lint
+
+      # JD Round 1 F5: `sam validate` only parses the template. It does not
+      # exercise `src/requirements.txt`, so a runtime-dep drift (added a
+      # dep to pyproject.toml but not src/requirements.txt) would go
+      # unnoticed until deploy. `sam build` writes .aws-sam/build/ using
+      # the runtime deps declared in src/requirements.txt against the same
+      # Python 3.12 interpreter provisioned above — a resolution failure
+      # here is a real signal that the deployment package is broken.
+      - name: SAM build (verifies src/requirements.txt resolves)
+        run: sam build --use-container=false

@@ -1,57 +1,66 @@
 # Code Review Agent 🤖
 
-Automated GitHub PR reviewer powered by Amazon Bedrock (Claude Haiku).
+[![CI](https://github.com/mrs/hackkiroaws/actions/workflows/ci.yml/badge.svg)](https://github.com/mrs/hackkiroaws/actions/workflows/ci.yml)
+
+Automated GitHub PR reviewer powered by Amazon Bedrock (Claude 3 Haiku).
 
 ## What it does
 
-1. Receives GitHub PR webhooks (open/sync events)
-2. Fetches the diff via MCP tools
-3. Analyzes changes with Bedrock Claude Haiku
-4. Posts structured inline comments back to the PR
+1. Receives GitHub PR webhooks (`pull_request` events: `opened`, `synchronize`, `reopened`).
+2. Fetches the diff via the GitHub REST API.
+3. Analyzes changes with Bedrock Claude 3 Haiku (`anthropic.claude-3-haiku-20240307`).
+4. Posts a summary + inline review comments back to the PR.
 
 ## Architecture
 
 ```
-GitHub → API Gateway HTTP → Lambda → Bedrock (Haiku)
-                                  ↕
-                              S3 (cache)
+GitHub → API Gateway HTTP API v2 → Lambda → Bedrock (Haiku)
+                                       ↕
+                                   S3 (diff + analysis cache)
+                                   Secrets Manager (webhook secret + token)
 ```
 
 ## Quick Start
 
 ```bash
-# Install dev dependencies
+# 1. Install project + dev dependencies (editable)
 pip install -e ".[dev]"
 
-# Run tests
-pytest
-
-# Lint & format
-ruff check src/ tests/
-black --check src/ tests/
-
-# Local Lambda invoke
-sam build && sam local invoke ReviewFunction --event events/pr_opened.json
-
-# Deploy
-sam deploy --guided
+# 2. Run the local gate — same bundle CI runs
+pytest --cov=code_review_agent --cov-fail-under=98
+ruff check src/ tests/ mcp_server/
+black --check src/ tests/ mcp_server/
+sam validate --lint
 ```
+
+### Smoke-test the handler locally
+
+See [`docs/smoke-test.md`](docs/smoke-test.md) — direct-Python invocation,
+`sam build`, and `sam local invoke` walkthrough with a documented Docker
+API-drift caveat.
+
+### Deploy to AWS
+
+See [`docs/deployment.md`](docs/deployment.md) — `sam deploy --guided`
+walkthrough with parallel Personal Access Token (simple) and GitHub App
+(organization-scoped) auth paths.
 
 ## Project Structure
 
-See [.kiro/steering/structure.md](.kiro/steering/structure.md) for full layout.
+See [`.kiro/steering/structure.md`](.kiro/steering/structure.md) for the full
+layout.
 
 ## Cost Governance
 
-This project is designed to stay under $3/month. See [aws-cost-governance.md](.kiro/steering/aws-cost-governance.md).
+Designed to stay under $3/month at typical PR volumes. See
+[`.kiro/steering/aws-cost-governance.md`](.kiro/steering/aws-cost-governance.md)
+for the cost model (local-only, gitignored).
 
-## MCP Server
+## MCP Server (optional / future)
 
-The `mcp_server/` provides stdio-based tools:
-- `read_pr_diff` — fetch PR diff from GitHub
-- `post_review_comment` — post inline review comments
-
-Run standalone: `python -m mcp_server.server`
+`mcp_server/` contains a scaffold for exposing the PR-review tooling over the
+Model Context Protocol. Not required for the Lambda flow above; see
+`.kiro/specs/cra-001/tasks.md` Wave 5 for status.
 
 ## License
 

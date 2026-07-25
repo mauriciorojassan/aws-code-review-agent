@@ -9,8 +9,12 @@ Covers two auth paths in parallel — pick one:
   first-time deploy where you want to see the pipeline working end-to-end.
 - **[Path B: GitHub App](#path-b--github-app)** — organization-scoped
   installation, per-repo permission granularity, better audit trail. Best for
-  a team or enterprise deployment. Currently requires manual token refresh
-  every hour; see [Future — auto-refresh in Lambda](#future--auto-refresh-in-lambda).
+  a team or enterprise deployment. ⚠️ **Requires an hourly token refresh
+  handled outside this stack**: the current handler consumes a pre-generated
+  installation access token from Secrets Manager and does not perform the
+  JWT exchange itself; installation tokens expire in 1 hour. See
+  [Future — auto-refresh in Lambda](#future--auto-refresh-in-lambda) for the
+  planned in-stack solution.
 
 Both paths use the same SAM stack; only the token you paste into Secrets
 Manager differs.
@@ -37,19 +41,36 @@ Manager differs.
 
 ## IAM permissions the deployer needs
 
-Your AWS credentials must be able to create:
+CloudFormation invokes the caller's credentials when creating resources on
+your behalf, so the deployer's principal needs permission for **every**
+service the template touches — not just CloudFormation and IAM.
 
-- CloudFormation stacks
-- IAM roles (for the Lambda execution role)
-- Lambda functions
-- API Gateway HTTP APIs
-- S3 buckets
-- Secrets Manager secrets
-- CloudWatch alarms
+**Simplest bootstrap** — attach the AWS-managed `AdministratorAccess`
+policy to the deploying principal. This is the fastest path for a
+first-time deploy or a solo maintainer working in a personal account.
+Reduce to least-privilege once you have a working deploy to baseline
+against.
 
-The `AWSCloudFormationFullAccess` + `IAMFullAccess` combination is sufficient
-for a first-time bootstrap. Reduce to a least-privilege policy for a real
-production account.
+**Least-privilege (production) bootstrap** — combine the following
+service permissions (either as inline policies or a custom managed
+policy):
+
+- `cloudformation:*` — create/update/delete the stack itself.
+- `iam:*` (or, tighter, `iam:CreateRole`, `iam:PutRolePolicy`,
+  `iam:PassRole`, `iam:DeleteRole`, `iam:GetRole`) — the Lambda
+  execution role.
+- `lambda:*` — the review function.
+- `apigateway:*` — the HTTP API + stage + integration.
+- `s3:*` (or scoped to the diff-cache bucket ARN pattern) — the cache
+  bucket + lifecycle rule.
+- `secretsmanager:*` (or scoped to the secret ARN) — the GitHub
+  credentials store.
+- `cloudwatch:*` + `logs:*` — the Bedrock-invocation alarm and the
+  Lambda log group.
+
+The `bedrock:InvokeModel` permission on the specific Haiku model ARN is
+attached to the *function's* execution role by the template — the
+deployer does not need it directly.
 
 ---
 
@@ -132,9 +153,13 @@ beyond your own rotation cadence.
 3. Expiration: **90 days** (rotate before expiry — set a calendar reminder).
 4. Repository access: choose the specific repositories the agent should review, or "All repositories" for org-wide coverage.
 5. Repository permissions:
-   - **Pull requests**: Read and write
-   - **Contents**: Read-only
-   - **Metadata**: Read-only (auto-added)
+   - **Pull requests**: Read and write — the reviewer fetches the PR's diff
+     and posts a review with inline comments.
+   - **Contents**: Read-only — required for the `GET /repos/{owner}/{repo}/pulls/{pr}`
+     endpoint (called with `Accept: application/vnd.github.v3.diff`) to
+     return the diff payload when the head is on a private repo.
+   - **Metadata**: Read-only (auto-added by GitHub when any repo permission
+     is selected).
 6. Generate token. **Copy the value immediately — GitHub only shows it once.**
 
 ### A2. Choose a webhook secret
@@ -209,9 +234,10 @@ planned in-stack solution.
    - Webhook URL: the `WebhookUrl` from Step 2.
    - Webhook secret: generate with `openssl rand -hex 32` and save it.
 5. Repository permissions:
-   - **Pull requests**: Read and write
-   - **Contents**: Read-only
-   - **Metadata**: Read-only (auto-added)
+   - **Pull requests**: Read and write — post the review + inline comments.
+   - **Contents**: Read-only — read the diff payload from the pulls endpoint.
+   - **Metadata**: Read-only (auto-added by GitHub when any repo permission
+     is selected).
 6. Subscribe to events: **Pull request**.
 7. Where can this app be installed: Any account (or restrict to your org).
 8. Create GitHub App.

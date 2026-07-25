@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -282,10 +283,16 @@ def _finding_to_comment(finding: Finding) -> dict[str, Any]:
 
     ``side: "RIGHT"`` anchors the comment to the new-file line, matching the
     validator invariant established in ``design.md`` §5.
+
+    LLM-generated ``message`` and ``suggestion`` are passed through
+    :func:`_escape_markdown` at render time so backticks and leading pipes
+    can't break out of the rendering context (see F8, Wave 4 JD).
     """
-    header = f"**[{finding.severity.upper()}]** {finding.message}"
+    message = _escape_markdown(finding.message)
+    header = f"**[{finding.severity.upper()}]** {message}"
     if finding.suggestion:
-        body = f"{header}\n\n💡 {finding.suggestion}"
+        suggestion = _escape_markdown(finding.suggestion)
+        body = f"{header}\n\n💡 {suggestion}"
     else:
         body = header
     return {
@@ -352,10 +359,11 @@ def _build_review_body(
         parts.append("")
         parts.append("```")
         for finding in overflow:
-            suffix = f" — {finding.suggestion}" if finding.suggestion else ""
+            message = _escape_markdown(finding.message)
+            suffix = f" — {_escape_markdown(finding.suggestion)}" if finding.suggestion else ""
             parts.append(
                 f"[{finding.severity.upper()}] {finding.file}:{finding.line} — "
-                f"{finding.message}{suffix}"
+                f"{message}{suffix}"
             )
         parts.append("```")
         parts.append("")
@@ -371,6 +379,40 @@ def _coerce_nonneg_int(value: Any) -> int:
     except (TypeError, ValueError):
         return 0
     return max(result, 0)
+
+
+# Compiled once at import; ``re.sub`` is called per finding so keeping the
+# pattern module-level saves the compile cost on every render.
+_LEADING_PIPE_RE = re.compile(r"(^|\n)[ \t]*\|")
+
+
+def _escape_markdown(text: str) -> str:
+    """Strip characters that could break out of our rendering context.
+
+    Two LLM-content risks addressed at render time (F8, Wave 4 JD):
+
+    1. **Triple-backticks**. Overflow findings are rendered inside a fenced
+       code block. A triple-backtick sequence in a finding message that
+       landed at the start of a line would close the fence prematurely
+       and leak subsequent content out of the code context. Stripped
+       entirely — simpler than variable-width fence detection, and
+       lossless for the reader (backtick clusters are rare in review
+       prose).
+
+    2. **Leading pipes**. A pipe at the start of a line can be interpreted
+       as a table-row delimiter. GitHub markdown *requires* a separator
+       row (``|---|``) before a real table renders, so the risk is small
+       — but stripping keeps rendering deterministic against future
+       renderer changes and against LLM output that happens to include a
+       markdown-like separator pattern.
+
+    Empty input is returned as-is (no allocation).
+    """
+    if not text:
+        return text
+    text = text.replace("```", "")
+    text = _LEADING_PIPE_RE.sub(r"\1", text)
+    return text
 
 
 # ---------------------------------------------------------------------------

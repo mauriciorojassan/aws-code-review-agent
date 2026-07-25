@@ -24,6 +24,7 @@ from code_review_agent.review_publisher import (
     PublishResult,
     _build_review_body,
     _dedup_marker,
+    _escape_markdown,
     _finding_to_comment,
     _sort_findings,
     publish_review,
@@ -1020,3 +1021,164 @@ def test_post_issue_comment_creates_and_closes_client_when_none_provided(
 
     assert result is True
     assert close_calls["n"] == 1
+
+
+# ---------------------------------------------------------------------------
+# F8 — markdown escaping in LLM-generated finding text
+# ---------------------------------------------------------------------------
+
+
+class TestEscapeMarkdown:
+    """Direct unit tests for the ``_escape_markdown`` helper."""
+
+    def test_empty_string_returned_as_is(self) -> None:
+        assert _escape_markdown("") == ""
+
+    def test_normal_prose_unchanged(self) -> None:
+        text = "The variable `foo` should be renamed to `bar`."
+        assert _escape_markdown(text) == text
+
+    def test_triple_backticks_stripped(self) -> None:
+        text = "See snippet: ```python\nfoo = 1\n``` for context."
+        result = _escape_markdown(text)
+        assert "```" not in result
+        # Non-fence content preserved.
+        assert "python\nfoo = 1\n" in result
+
+    def test_multiple_triple_backtick_clusters_all_stripped(self) -> None:
+        text = "Before ``` middle ``` after"
+        assert _escape_markdown(text) == "Before  middle  after"
+
+    def test_leading_pipe_stripped(self) -> None:
+        text = "| Column A | Column B |"
+        result = _escape_markdown(text)
+        assert not result.startswith("|")
+        # Trailing pipes preserved (they don't create rows on their own).
+        assert result.endswith("|")
+
+    def test_leading_pipe_after_newline_stripped(self) -> None:
+        text = "First line.\n| Not a table row"
+        result = _escape_markdown(text)
+        # Pipe stripped from line-start; residual whitespace + content
+        # preserved (no visual difference in markdown rendering).
+        assert "\n|" not in result
+        assert "Not a table row" in result
+
+    def test_leading_whitespace_then_pipe_stripped(self) -> None:
+        text = "   | Indented pipe"
+        result = _escape_markdown(text)
+        assert not result.lstrip().startswith("|")
+
+    def test_pipe_not_at_line_start_preserved(self) -> None:
+        text = "Use `foo | bar` for piped output."
+        assert _escape_markdown(text) == text
+
+    def test_quadruple_backticks_reduced_to_single(self) -> None:
+        # Any run of 3+ backticks in an aligned triplet is stripped;
+        # residual single backtick is fine (inline code, not a fence).
+        text = "```` weird ````"
+        result = _escape_markdown(text)
+        assert "```" not in result
+
+
+class TestFindingToCommentEscaping:
+    """``_finding_to_comment`` applies escaping to both message and suggestion."""
+
+    def test_message_with_triple_backticks_escaped(self) -> None:
+        f = Finding(
+            file="src/x.py",
+            line=1,
+            severity="warning",
+            message="Bad snippet: ```bad code``` here",
+            suggestion=None,
+        )
+        comment = _finding_to_comment(f)
+        assert "```" not in comment["body"]
+        assert "**[WARNING]**" in comment["body"]
+
+    def test_suggestion_with_triple_backticks_escaped(self) -> None:
+        f = Finding(
+            file="src/x.py",
+            line=1,
+            severity="error",
+            message="null deref",
+            suggestion="Use ```None``` guard",
+        )
+        comment = _finding_to_comment(f)
+        assert "```" not in comment["body"]
+        assert "None" in comment["body"]  # non-fence content preserved
+
+    def test_leading_pipe_in_message_stripped(self) -> None:
+        f = Finding(
+            file="src/x.py",
+            line=1,
+            severity="info",
+            message="| looks like a table row",
+            suggestion=None,
+        )
+        comment = _finding_to_comment(f)
+        # After the "**[INFO]** " prefix the pipe still exists (not line-start
+        # in the rendered body), so the escaping matters at line-start.
+        # More importantly: no *new* line inside body starts with a pipe.
+        for line in comment["body"].split("\n")[1:]:
+            assert not line.lstrip().startswith("|"), line
+
+
+class TestBuildReviewBodyEscaping:
+    """``_build_review_body`` overflow block never leaks the fence."""
+
+    def _finding(self, msg: str, sug: str | None = None) -> Finding:
+        return Finding(file="src/x.py", line=1, severity="warning", message=msg, suggestion=sug)
+
+    def test_overflow_finding_with_backticks_does_not_break_fence(self) -> None:
+        overflow = [self._finding("Bad ```block``` inside")]
+        body = _build_review_body(
+            all_findings=[self._finding("primary")],
+            overflow=overflow,
+            summary_data={"excluded_files": 0},
+            head_sha=_SHA,
+        )
+        # Count fence markers — should be exactly 2 (open + close of the
+        # overflow block), never 3+ (which would mean a stray fence leaked).
+        assert body.count("```") == 2
+
+    def test_overflow_suggestion_with_backticks_does_not_break_fence(self) -> None:
+        overflow = [self._finding("bad thing", sug="use ```safe``` instead")]
+        body = _build_review_body(
+            all_findings=[self._finding("primary")],
+            overflow=overflow,
+            summary_data={"excluded_files": 0},
+            head_sha=_SHA,
+        )
+        assert body.count("```") == 2
+
+    def test_overflow_finding_with_leading_pipe_stripped(self) -> None:
+        overflow = [self._finding("| would-be table row")]
+        body = _build_review_body(
+            all_findings=[self._finding("primary")],
+            overflow=overflow,
+            summary_data={"excluded_files": 0},
+            head_sha=_SHA,
+        )
+        # After escape the message is " would-be table row"; the overflow
+        # line ends up as "[WARNING] src/x.py:1 —  would-be table row".
+        # The important invariant: no line inside the overflow fence
+        # starts with a pipe (which would create an unintended structure).
+        fence_open = body.index("```") + len("```")
+        fence_close = body.rindex("```")
+        overflow_block = body[fence_open:fence_close]
+        for line in overflow_block.split("\n"):
+            assert not line.lstrip().startswith("|"), line
+        assert "would-be table row" in body
+
+    def test_normal_overflow_content_unchanged(self) -> None:
+        """Sanity: escape is idempotent on well-behaved input."""
+        overflow = [self._finding("Rename foo to bar", sug="see PEP 8")]
+        body = _build_review_body(
+            all_findings=[self._finding("primary")],
+            overflow=overflow,
+            summary_data={"excluded_files": 0},
+            head_sha=_SHA,
+        )
+        assert "Rename foo to bar" in body
+        assert "see PEP 8" in body

@@ -46,14 +46,16 @@
 - [ ] **T5.2** Create `tests/test_mcp_server.py` — MCP tool unit tests with mocked GitHub API.
 - [ ] **T5.3** (Optional) Wire handler to use MCP tools instead of direct GitHub API calls. Evaluate trade-off: MCP adds abstraction but also latency and complexity in v1.
 
-## Wave 6: Deployment and CI (depends on Wave 4)
+## Wave 6: Deployment and CI (completed)
 
 - [x] **T6.1** Secrets Manager resource — Already in `template.yaml` (scaffolded in foundation commit).
 - [x] **T6.2** CloudWatch alarm for Bedrock invocation count — Already in `template.yaml` (scaffolded in foundation commit).
 - [x] **T6.3** S3 lifecycle rule (7-day expiry) — Already in `template.yaml` (scaffolded in foundation commit).
-- [ ] **T6.4** `sam build && sam deploy --guided` runbook — Document in `README.md`: prerequisites (AWS credentials, SAM CLI, GitHub App setup), parameter values (secrets ARN, bucket name), deployment steps, webhook URL retrieval from Outputs, GitHub webhook configuration.
-- [ ] **T6.5** Create `.github/workflows/ci.yml` — CI workflow on `push` and `pull_request` to `main`. Jobs: (1) `pytest --cov` with coverage report; (2) `ruff check` + `black --check`; (3) `sam validate --lint`. Fail on any non-zero exit.
-- [ ] **T6.6** Smoke test with `sam local invoke` — Run with fixture event, verify exit code 0 and expected log output structure.
+- [x] **T6.4** `sam build && sam deploy --guided` runbook — Documented in `docs/deployment.md` with parallel PAT and GitHub App auth walkthroughs, prerequisites, IAM permissions summary, guided-deploy prompt table, webhook configuration, rollback/teardown, and a "Future — auto-refresh in Lambda" section for the deferred JWT exchange.
+- [x] **T6.5** Create `.github/workflows/ci.yml` — Single-job workflow on `push` and `pull_request` to `main`. Runs `ruff check`, `black --check`, `pytest --cov=code_review_agent --cov-fail-under=98`, and `sam validate --lint` on Python 3.12 (matches Lambda runtime). Concurrency group cancels superseded runs.
+- [x] **T6.6** Smoke test with `sam local invoke` — `docs/smoke-test.md` covers direct-Python invocation (Step 1, always works), `sam validate --lint` (Step 2), `sam build` (Step 3), and `sam local invoke` (Step 4, Docker-dependent) with a documented SAM CLI ↔ Docker API-drift caveat. README's Quick Start now cross-links both `docs/smoke-test.md` and `docs/deployment.md`.
+
+**Status:** Wave 6 gate passed. CI workflow landed in commit b15345c (T6.5). Deployment runbook landed in commit 8b678f7 (T6.4). README cross-links + CI badge landed in commit 96ed23a (T6.6). Also resolved during this wave: the F8 markdown-escaping item deferred from the Wave 3 judgment day — a targeted `_escape_markdown` helper (strip triple-backticks + leading pipes) was added at render time in `_finding_to_comment` and `_build_review_body` under commit adc47f8, with 17 new tests covering unit behavior and the "overflow fence never breaks" invariant. Final gate: 301 tests pass, src total coverage 98.56%, all touched modules at 100%; ruff + black clean; `sam validate --lint` clean.
 
 ## Definition of Done
 

@@ -161,18 +161,6 @@ def test_finding_file_not_in_map_returns_false() -> None:
     assert validate_finding(finding, hunk_map) is False
 
 
-def test_finding_line_zero_returns_false() -> None:
-    hunk_map = {"main.py": [HunkRange(start_line=10, line_count=5)]}
-    finding = Finding(file="main.py", line=0, severity="warning", message="x")
-    assert validate_finding(finding, hunk_map) is False
-
-
-def test_finding_line_negative_returns_false() -> None:
-    hunk_map = {"main.py": [HunkRange(start_line=10, line_count=5)]}
-    finding = Finding(file="main.py", line=-5, severity="warning", message="x")
-    assert validate_finding(finding, hunk_map) is False
-
-
 def test_finding_file_has_empty_hunk_list_returns_false() -> None:
     # Defensive: file present in map but with an empty hunk list.
     hunk_map: dict[str, list[HunkRange]] = {"main.py": []}

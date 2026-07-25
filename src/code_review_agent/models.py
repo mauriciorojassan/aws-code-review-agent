@@ -4,14 +4,18 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Finding(BaseModel):
     """A single review finding on a specific line."""
 
     file: str
-    line: int
+    # ``line`` is the absolute 1-indexed line number in the post-state (new)
+    # file, matching the GitHub review API. Enforced at the model layer so
+    # that downstream code (diff validator, review publisher) can trust the
+    # invariant without redundant checks.
+    line: int = Field(gt=0)
     severity: Literal["error", "warning", "info"]
     message: str
     suggestion: str | None = None

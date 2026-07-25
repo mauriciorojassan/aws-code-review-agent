@@ -15,6 +15,7 @@ import re
 from typing import Any
 
 import boto3
+from botocore.config import Config
 from pydantic import ValidationError
 
 from code_review_agent.models import Finding
@@ -36,6 +37,18 @@ _HAIKU_RE = re.compile(r"^anthropic\.claude-3(-5|-7)?-haiku")
 # Sentinel used to distinguish "caller omitted the argument" (→ resolve from
 # env var) from "caller explicitly passed ``None`` / empty" (→ ValueError).
 _UNSET: Any = object()
+
+# Timeouts sized to fit inside the 30-second Lambda budget: 3s to establish
+# the TLS session + up to 25s for Bedrock to stream a response = 28s worst
+# case, leaving 2s for shutdown and structured-log flush. ``max_attempts=1``
+# disables botocore's automatic retry — a retry inside a 30s budget would
+# always blow past it, and Lambda's own invocation-retry policy is a more
+# appropriate lever for transient Bedrock errors.
+_BEDROCK_CLIENT_CONFIG = Config(
+    connect_timeout=3,
+    read_timeout=25,
+    retries={"max_attempts": 1, "mode": "standard"},
+)
 
 # Module-level lazy singleton. Reset to ``None`` in tests via monkeypatch.
 _client: Any | None = None
@@ -75,10 +88,14 @@ def get_bedrock_client() -> Any:
     resets ``_client`` to ``None``). This mirrors the pattern used by
     :mod:`code_review_agent.diff_cache` and avoids the per-invocation
     ``boto3.client`` construction cost on warm Lambda containers.
+
+    The client is configured with :data:`_BEDROCK_CLIENT_CONFIG` so that
+    a hanging Bedrock call surfaces as a catchable ``ReadTimeoutError``
+    before Lambda kills the container at the 30-second budget boundary.
     """
     global _client
     if _client is None:
-        _client = boto3.client("bedrock-runtime")
+        _client = boto3.client("bedrock-runtime", config=_BEDROCK_CLIENT_CONFIG)
     return _client
 
 

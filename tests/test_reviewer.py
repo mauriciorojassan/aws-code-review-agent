@@ -20,6 +20,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from botocore.exceptions import BotoCoreError, ClientError
 
 from code_review_agent import reviewer
 from code_review_agent.models import Finding
@@ -217,6 +218,29 @@ def test_bedrock_client_is_cached_singleton() -> None:
         assert client.invoke_model.call_count == 5
 
 
+def test_bedrock_client_is_configured_with_lambda_safe_timeouts() -> None:
+    """The Bedrock client must be built with timeouts that fit inside 30s Lambda budget.
+
+    Regression guard: without an explicit ``botocore.config.Config``, boto3
+    defaults to a 60-second read timeout, which means a hanging Bedrock
+    call is killed by Lambda's own timeout (surfacing as an opaque
+    ``Task timed out`` in CloudWatch) rather than by a catchable
+    ``ReadTimeoutError`` we can log with context.
+    """
+    with patch("code_review_agent.reviewer.boto3") as mock_boto3:
+        mock_boto3.client.return_value = MagicMock(name="bedrock-client")
+        reviewer._client = None
+        reviewer.get_bedrock_client()
+
+        kwargs = mock_boto3.client.call_args.kwargs
+        assert "config" in kwargs, "Bedrock client must be built with a botocore Config"
+        cfg = kwargs["config"]
+        assert cfg.read_timeout <= 25
+        assert cfg.connect_timeout <= 5
+        # max_attempts=1 means "no retries" — one attempt total.
+        assert cfg.retries["max_attempts"] == 1
+
+
 def test_get_bedrock_client_lazily_constructs() -> None:
     """First ``get_bedrock_client()`` call creates the client; second reuses."""
     with patch("code_review_agent.reviewer.boto3") as mock_boto3:
@@ -228,6 +252,39 @@ def test_get_bedrock_client_lazily_constructs() -> None:
 
         assert first is second
         assert mock_boto3.client.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Bedrock error propagation
+# ---------------------------------------------------------------------------
+
+
+def test_analyze_diff_propagates_bedrock_client_error(stub_client: MagicMock) -> None:
+    """AWS API errors from Bedrock must surface to the handler.
+
+    ``analyze_diff`` intentionally does not swallow :class:`ClientError`
+    (throttling, access denied, model not found, service unavailable) —
+    the design contract (``design.md`` §1 step 9) puts responsibility on
+    the Lambda handler to catch these and translate them into a 500 so
+    GitHub retries the webhook.
+    """
+    stub_client.invoke_model.side_effect = ClientError(
+        {"Error": {"Code": "ThrottlingException", "Message": "Too many requests"}},
+        "InvokeModel",
+    )
+    with pytest.raises(ClientError, match="ThrottlingException"):
+        reviewer.analyze_diff("diff", model_id=_HAIKU_DEFAULT)
+
+
+def test_analyze_diff_propagates_bedrock_botocore_error(stub_client: MagicMock) -> None:
+    """Transport-level ``BotoCoreError`` subclasses must also propagate."""
+    from botocore.exceptions import EndpointConnectionError
+
+    stub_client.invoke_model.side_effect = EndpointConnectionError(
+        endpoint_url="https://bedrock-runtime.us-east-1.amazonaws.com/"
+    )
+    with pytest.raises(BotoCoreError):
+        reviewer.analyze_diff("diff", model_id=_HAIKU_DEFAULT)
 
 
 # ---------------------------------------------------------------------------

@@ -412,6 +412,64 @@ def test_403_without_rate_limit_header_retries_as_generic_error(
     assert len(recorder.post_requests) == 2  # retried once
 
 
+def test_429_returns_rate_limit_and_does_not_retry(
+    summary_data: dict[str, Any],
+) -> None:
+    """HTTP 429 is unambiguously a rate-limit status per RFC 6585."""
+    recorder = _Recorder()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, json=[])
+        return httpx.Response(429, headers={"Retry-After": "60"})
+
+    client = _build_client(handler, recorder)
+    result = publish_review(_REPO, _PR, _SHA, [_finding()], summary_data, client=client)
+
+    assert result == PublishResult(success=False, review_id=None, skipped_reason="rate_limit")
+    assert len(recorder.post_requests) == 1  # no retry
+
+
+def test_429_without_headers_still_treated_as_rate_limit(
+    summary_data: dict[str, Any],
+) -> None:
+    """A 429 without a ``Retry-After`` header still short-circuits."""
+    recorder = _Recorder()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, json=[])
+        return httpx.Response(429)
+
+    client = _build_client(handler, recorder)
+    result = publish_review(_REPO, _PR, _SHA, [_finding()], summary_data, client=client)
+
+    assert result.skipped_reason == "rate_limit"
+    assert len(recorder.post_requests) == 1
+
+
+def test_403_with_retry_after_treated_as_secondary_rate_limit(
+    summary_data: dict[str, Any],
+) -> None:
+    """GitHub's secondary (abuse) rate limit surfaces as 403 + ``Retry-After``."""
+    recorder = _Recorder()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, json=[])
+        return httpx.Response(
+            403,
+            headers={"Retry-After": "30"},
+            json={"message": "You have exceeded a secondary rate limit."},
+        )
+
+    client = _build_client(handler, recorder)
+    result = publish_review(_REPO, _PR, _SHA, [_finding()], summary_data, client=client)
+
+    assert result.skipped_reason == "rate_limit"
+    assert len(recorder.post_requests) == 1  # no retry
+
+
 # ---------------------------------------------------------------------------
 # Scenario 5 — GitHub error + retry semantics
 # ---------------------------------------------------------------------------

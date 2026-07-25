@@ -221,10 +221,28 @@ def _post_with_retry(
 
 
 def _is_rate_limited(response: httpx.Response) -> bool:
-    """Detect the exhausted-primary-rate-limit signal per GitHub docs."""
-    if response.status_code != 403:
-        return False
-    return response.headers.get("X-RateLimit-Remaining") == "0"
+    """Detect GitHub rate-limit exhaustion, primary and secondary.
+
+    GitHub returns rate-limit signals on **either** status 403 or 429:
+
+    * Primary hourly limit: 403 with ``X-RateLimit-Remaining: 0``.
+    * Secondary abuse limit: 403 or 429 with a ``Retry-After`` header.
+    * 429 is defined as a rate-limit status by RFC 6585; even without a
+      GitHub-specific header we treat it as one.
+
+    Any 403 without one of those signals is a permissions / policy
+    failure — *not* a rate limit — and falls through to the generic
+    retry-once branch of :func:`_post_with_retry`.
+    """
+    status = response.status_code
+    if status == 429:
+        return True
+    if status == 403:
+        if response.headers.get("X-RateLimit-Remaining") == "0":
+            return True
+        if response.headers.get("Retry-After"):
+            return True
+    return False
 
 
 def _extract_review_id(response: httpx.Response) -> str | None:

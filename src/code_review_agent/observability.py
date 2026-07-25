@@ -27,7 +27,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 logger = logging.getLogger(__name__)
 
@@ -111,9 +111,17 @@ def emit_metric(
 ) -> None:
     """Emit a single CloudWatch custom metric under the configured namespace.
 
-    Failures are logged and swallowed: observability must never propagate
-    an exception into the pipeline. ``dimensions`` values are coerced to
-    strings because CloudWatch requires string dimension values.
+    Failures from the AWS SDK — both API-level (:class:`ClientError`, e.g.
+    throttling, access denied) and transport-level
+    (:class:`BotoCoreError` subclasses, e.g. ``EndpointConnectionError``,
+    ``ConnectTimeoutError``) — are logged at warning level and swallowed:
+    observability must never propagate an infrastructure fault into the
+    pipeline. Non-botocore exceptions (:class:`RuntimeError`,
+    :class:`TypeError`, etc.) intentionally propagate — those signal
+    caller bugs, not observability outages.
+
+    ``dimensions`` values are coerced to strings because CloudWatch
+    requires string dimension values.
 
     Args:
         metric_name: CloudWatch metric name (e.g. ``"ReviewCompleted"``,
@@ -133,5 +141,5 @@ def emit_metric(
     client = get_cloudwatch_client()
     try:
         client.put_metric_data(Namespace=_namespace(), MetricData=metric_data)
-    except ClientError as e:
+    except (ClientError, BotoCoreError) as e:
         logger.warning("Failed to emit metric %s: %s", metric_name, e)

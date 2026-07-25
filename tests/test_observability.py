@@ -26,7 +26,7 @@ from unittest.mock import MagicMock, patch
 
 import boto3
 import pytest
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, EndpointConnectionError
 from moto import mock_aws
 
 from code_review_agent import observability
@@ -357,8 +357,35 @@ def test_emit_metric_swallows_client_error(
     assert "ReviewFailed" in warnings[0].getMessage()
 
 
-def test_emit_metric_propagates_non_client_error(stub_cw: MagicMock) -> None:
-    """Non-ClientError exceptions are intentionally not swallowed."""
+def test_emit_metric_swallows_botocore_transport_error(
+    stub_cw: MagicMock, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Transport-level ``BotoCoreError`` subclasses must also fail silently.
+
+    Regression guard: an earlier revision only caught :class:`ClientError`,
+    which left endpoint / DNS / TLS failures propagating into the pipeline
+    and violating the fail-silent NFR.
+    """
+    stub_cw.put_metric_data.side_effect = EndpointConnectionError(
+        endpoint_url="https://monitoring.us-east-1.amazonaws.com/"
+    )
+
+    with caplog.at_level(logging.WARNING, logger=_LOGGER_NAME):
+        # Must not raise.
+        observability.emit_metric("ReviewCompleted", 1, {"repo": "o/r"})
+
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert warnings
+    assert "ReviewCompleted" in warnings[0].getMessage()
+
+
+def test_emit_metric_propagates_non_botocore_error(stub_cw: MagicMock) -> None:
+    """Non-botocore exceptions are intentionally not swallowed.
+
+    ``RuntimeError``, ``TypeError``, ``ValueError`` and similar signal
+    caller bugs (bad dimension shapes, missing kwargs), not observability
+    outages. Surface them.
+    """
     stub_cw.put_metric_data.side_effect = RuntimeError("bug in caller")
     with pytest.raises(RuntimeError, match="bug in caller"):
         observability.emit_metric("ReviewFailed", 1, {"repo": "o/r"})

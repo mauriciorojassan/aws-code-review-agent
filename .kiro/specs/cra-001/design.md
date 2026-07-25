@@ -32,7 +32,7 @@ Lambda (handler.py)
     ├──▶ Deduplication Check ──▶ head-SHA marker exists? ──▶ [200 no-op, skip post]
     │
     ├──▶ Review Publisher ──▶ cap at 20 inline, overflow to body ──▶ GitHub review
-    │                     ──▶ rate-limit 403? ──▶ [neutral comment + ReviewFailed]
+    │                     ──▶ rate-limit 403/429? ──▶ [neutral comment + ReviewFailed]
     │
     └──▶ Observability ──▶ structured log + CloudWatch metrics
 ```
@@ -66,7 +66,7 @@ Transient failures (GitHub API errors, Bedrock timeouts) return non-2xx status c
 12. Cache validated findings in S3 `analyses/{repo}/{pr}/{head_sha}.json`.
 13. Check for existing bot-authored reviews with the same head-SHA marker. If found → return 200 no-op (dedup).
 14. Build GitHub review: cap at 20 inline comments prioritized by severity (error > warning > info) and diff order. Overflow findings go into fenced code block in review body. Include severity counts, excluded-file count, truncation note (if applicable), and dedup marker `<!-- cra-dedup: {head_sha} -->`.
-15. Post review to GitHub. On HTTP 403 with `X-RateLimit-Remaining: 0` → skip review, post neutral issue comment, emit `ReviewFailed`, return 200. On other GitHub failure → retry once, then log and return 502.
+15. Post review to GitHub. On rate-limit exhaustion (HTTP 403 with `X-RateLimit-Remaining: 0`, HTTP 403 with `Retry-After`, or any HTTP 429) → skip review, post neutral issue comment, emit `ReviewFailed`, return 200. On other GitHub failure → retry once, then log and return 502.
 16. Emit structured log and CloudWatch metrics. Return 200.
 
 **Environment variables:**
@@ -187,7 +187,7 @@ class PublishResult:
    - Overflow findings block (if applicable).
    - Dedup marker: `<!-- cra-dedup: {head_sha} -->`.
 6. Call GitHub API `POST /repos/{owner}/{repo}/pulls/{pr}/reviews` with `event: "COMMENT"`, inline comments array, and body.
-7. Handle HTTP 403 with `X-RateLimit-Remaining: 0` → return `PublishResult(success=False, skipped_reason="rate_limit")`. Handler posts neutral issue comment.
+7. Detect GitHub rate-limit exhaustion. Primary hourly limit surfaces as HTTP 403 with `X-RateLimit-Remaining: 0`; secondary (abuse) limit surfaces as HTTP 403 or 429 with a `Retry-After` header; a bare HTTP 429 is treated as rate-limit per RFC 6585 regardless of headers. Any of these → return `PublishResult(success=False, skipped_reason="rate_limit")` without retrying. Handler posts neutral issue comment.
 8. On other GitHub failure → retry once. Still fails → return `PublishResult(success=False, skipped_reason="github_error")`.
 9. Return `PublishResult(success=True, review_id=response["id"])`.
 
@@ -292,7 +292,7 @@ class ReviewResult(BaseModel):
 | Bedrock timeout/error | Log, do not post review | 500 | Yes |
 | Out-of-hunk findings after validation | Log structured failure, do not post | 200 | No (data quality) |
 | Dedup hit (marker exists) | Log, skip posting | 200 | No |
-| GitHub rate-limit exhausted (403) | Post neutral issue comment, emit `ReviewFailed` | 200 | No |
+| GitHub rate-limit exhausted (403 with `X-RateLimit-Remaining: 0`, 403/429 with `Retry-After`, or bare 429) | Post neutral issue comment, emit `ReviewFailed` | 200 | No |
 | GitHub review post failure (non-rate-limit) | Retry once, log, emit `ReviewFailed` | 502 | Yes |
 | Cache miss | Not an error; proceed with fetch + analyze | N/A | N/A |
 

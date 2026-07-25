@@ -66,12 +66,12 @@ def validate_finding(finding: Finding, hunk_map: dict[str, list[HunkRange]]) -> 
     """Return True iff ``finding.file`` is present in ``hunk_map`` AND
     ``finding.line`` falls within at least one of its post-state ``HunkRange``s.
 
-    Never raises. Returns False for any malformed input, including line numbers
-    less than 1 and files whose hunk list is empty.
+    Never raises. Returns False when the file is not in the map or when the
+    line falls outside every hunk. ``finding.line >= 1`` is guaranteed by
+    the :class:`Finding` model (``Field(gt=0)``); no runtime check needed
+    here.
     """
     if finding.file not in hunk_map:
-        return False
-    if finding.line < 1:
         return False
     for hunk in hunk_map[finding.file]:
         end_line = hunk.start_line + hunk.line_count - 1

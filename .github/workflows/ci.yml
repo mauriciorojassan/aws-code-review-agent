@@ -42,12 +42,12 @@ jobs:
       - name: Black (format check)
         run: black --check src/ tests/ mcp_server/
 
-      # --cov-fail-under=98 protects against real regressions without
-      # tripping on the diff_cache.py exception-path gap that we've
-      # deliberately accepted (88%). Developer local gate is stricter
-      # (near-100% per touched module, ≥ 99% total display).
+      # --cov-fail-under=99 enforces near-100% on the source package.
+      # All src modules now have 100% coverage; this floor catches any
+      # regression that drops a module below 100% without a deliberate
+      # acceptance note.
       - name: Pytest with coverage
-        run: pytest --cov=code_review_agent --cov-report=term-missing --cov-fail-under=98
+        run: pytest --cov=code_review_agent --cov-report=term-missing --cov-fail-under=99
 
       - name: Set up SAM CLI
         uses: aws-actions/setup-sam@v2

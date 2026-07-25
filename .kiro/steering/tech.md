@@ -21,12 +21,12 @@
 - **MCP Python SDK** — stdio transport server in `mcp_server/server.py` exposes `read_pr_diff` and `post_review_comment`. Not on the v1 execution path (see `product.md`). Retained for future local/IDE reviewer integrations.
 
 ## Quality & CI
-- **pytest** + **pytest-cov** — 100% coverage on every `src/code_review_agent/` module except `diff_cache.py` (88%, exception paths not exercised). Total src coverage 98.56%.
+- **pytest** + **pytest-cov** — 100% coverage on every `src/code_review_agent/` module. Total src coverage 100%.
 - **moto** — mocks all AWS calls (S3, Secrets Manager, CloudWatch, CloudWatch Logs). Zero real AWS traffic in tests.
 - **httpx.MockTransport** — HTTP-level GitHub mocking for `github_client.py` + `review_publisher.py` tests.
 - **ruff** — linter with `E, F, I, N, W, UP, S, B, A, C4, PT` rule sets enabled.
 - **black** — formatter, `line-length=100`, `target-version=py312`.
-- **GitHub Actions** — `.github/workflows/ci.yml` runs the same gate on every push + PR to `main`: ruff, black --check, pytest with `--cov=code_review_agent --cov-fail-under=98`, `sam validate --lint`, `sam build`. Python 3.12 only. Concurrency cancellation and pip caching keyed on `pyproject.toml` + both `requirements.txt` files. The 98% floor is set below the current 98.56% src total to leave room for tiny refactors while catching real regressions.
+- **GitHub Actions** — `.github/workflows/ci.yml` runs the same gate on every push + PR to `main`: ruff, black --check, pytest with `--cov=code_review_agent --cov-fail-under=99`, `sam validate --lint`, `sam build`. Python 3.12 only. Concurrency cancellation and pip caching keyed on `pyproject.toml` + both `requirements.txt` files.
 - Test-suite gate (local, before every commit): `pytest --cov` + `ruff check` + `black --check` + `sam validate --lint` + `sam build`. The final `sam build` step catches `src/requirements.txt` drift against `pyproject.toml` — added to both CI and the local gate in JD Round 1 to prevent silent runtime-dep divergence.
 
 ## Key Libraries
@@ -50,7 +50,7 @@
 pip install -e ".[dev]"
 
 # Run the full gate — matches CI exactly
-pytest --cov=code_review_agent --cov-fail-under=98
+pytest --cov=code_review_agent --cov-fail-under=99
 ruff check src/ tests/ mcp_server/
 black --check src/ tests/ mcp_server/
 sam validate --lint

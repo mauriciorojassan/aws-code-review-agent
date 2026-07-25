@@ -1034,6 +1034,13 @@ class TestEscapeMarkdown:
     def test_empty_string_returned_as_is(self) -> None:
         assert _escape_markdown("") == ""
 
+    def test_none_input_returns_empty_string(self) -> None:
+        """JD Round 1 F1: return type contract says ``-> str``, so None in
+        must yield ``""`` out, not None passthrough."""
+        # type: ignore[arg-type] on the None literal — this is exactly the
+        # accidental-Optional[str] scenario the defensive guard exists for.
+        assert _escape_markdown(None) == ""  # type: ignore[arg-type]
+
     def test_normal_prose_unchanged(self) -> None:
         text = "The variable `foo` should be renamed to `bar`."
         assert _escape_markdown(text) == text
@@ -1182,3 +1189,26 @@ class TestBuildReviewBodyEscaping:
         )
         assert "Rename foo to bar" in body
         assert "see PEP 8" in body
+
+    def test_quadruple_backtick_fence_never_leaks_through_integration(self) -> None:
+        """JD Round 1 F4: belt-and-braces integration check.
+
+        The unit-level test asserts ``_escape_markdown`` reduces a run of
+        4+ backticks. This test proves the invariant end-to-end: even if
+        the LLM emits 4- or 5-backtick fences (a common escape trick to
+        embed triple-backticks *inside* code blocks), the overflow block
+        renders with exactly 2 fence markers — the opener and the closer.
+        """
+        overflow = [
+            self._finding("Use ```` code ```` here"),  # 4-backtick pairs
+            self._finding("Also ````` here `````", sug="fix `````"),  # 5-backtick pairs
+        ]
+        body = _build_review_body(
+            all_findings=[self._finding("primary")],
+            overflow=overflow,
+            summary_data={"excluded_files": 0},
+            head_sha=_SHA,
+        )
+        # Exactly 2 fence markers: open + close of the overflow block.
+        # A stray unstripped ``` from an aligned pair would push count to 4+.
+        assert body.count("```") == 2

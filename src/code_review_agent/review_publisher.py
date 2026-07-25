@@ -406,10 +406,15 @@ def _escape_markdown(text: str) -> str:
        renderer changes and against LLM output that happens to include a
        markdown-like separator pattern.
 
-    Empty input is returned as-is (no allocation).
+    Empty input is returned as ``""`` — never ``None``. Callers can rely
+    on the return being a real ``str`` even if they pass an ``Optional[str]``
+    that resolves to ``None`` (defensive: the caller-side guards in
+    ``_finding_to_comment`` / ``_build_review_body`` already prevent this
+    today, but tightening the return contract closes the JD Round 1 F1
+    gap for any future call sites).
     """
     if not text:
-        return text
+        return ""
     text = text.replace("```", "")
     text = _LEADING_PIPE_RE.sub(r"\1", text)
     return text

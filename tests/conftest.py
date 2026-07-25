@@ -28,6 +28,9 @@ def s3_bucket():
         client = boto3.client("s3", region_name="us-east-1")
         client.create_bucket(Bucket="test-diff-cache-bucket")
         yield client
+    # Reset again on teardown so a stale (post-moto) client cannot leak
+    # into a subsequent test that skips this fixture.
+    diff_cache._client = None
 
 
 @pytest.fixture

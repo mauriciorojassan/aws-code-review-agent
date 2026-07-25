@@ -42,6 +42,7 @@ Code  When
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 import logging
 from typing import Any
@@ -86,6 +87,14 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
     # Step 1: signature validation. Runs before JSON parse so a malformed
     # body still yields a proper 401 rather than a 400.
     secret = credentials.get_webhook_secret()
+    if not secret:
+        # Fail-closed on deployment misconfiguration. An empty key would
+        # make hmac.new(b"", payload) produce a deterministic digest that
+        # any attacker with knowledge of the misconfig could forge — so
+        # reject every request until the operator wires up the secret.
+        logger.error("Webhook secret is not configured; rejecting request")
+        return _response(401, {"message": "webhook secret not configured"})
+
     signature = headers.get("x-hub-signature-256")
     if not webhook_validator.validate_signature(secret, body_bytes, signature):
         logger.warning("Rejected: invalid webhook signature")
@@ -148,6 +157,7 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
             action=action,
             token=token,
             source="diff_fetch",
+            cached=False,
         )
     except github_client.GitHubFetchError as e:
         logger.error("Diff fetch failed for %s#%d: %s", repo, pr, e)
@@ -157,6 +167,7 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
             action=action,
             head_sha=head_sha,
             reason="diff_fetch_error",
+            cached=False,
         )
         return _response(502, {"message": "diff fetch failed"})
 
@@ -197,6 +208,21 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
     # Step 9: Bedrock analysis.
     try:
         raw_findings = reviewer.analyze_diff(eligible.content)
+    except ValueError as e:
+        # Raised by reviewer when BEDROCK_MODEL_ID resolves to a non-Haiku
+        # value. Treated as a deployment misconfiguration — surface as 500
+        # so ops sees it, and emit ReviewFailed with a distinct reason so
+        # dashboards can distinguish infra faults from config errors.
+        logger.error("Model config error for %s#%d: %s", repo, pr, e)
+        _emit_failure(
+            repo=repo,
+            pr_url=pr_url,
+            action=action,
+            head_sha=head_sha,
+            reason="model_config_error",
+            cached=False,
+        )
+        return _response(500, {"message": "model configuration error"})
     except (ClientError, BotoCoreError) as e:
         logger.error("Bedrock analysis failed for %s#%d: %s", repo, pr, e)
         _emit_failure(
@@ -205,6 +231,7 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
             action=action,
             head_sha=head_sha,
             reason="bedrock_error",
+            cached=False,
         )
         return _response(500, {"message": "bedrock analysis failed"})
 
@@ -233,6 +260,7 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
             action=action,
             head_sha=head_sha,
             reason="out_of_hunk",
+            cached=False,
             out_of_hunk_count=out_of_hunk_count,
         )
         return _response(200, {"message": "out-of-hunk findings, review skipped"})
@@ -278,11 +306,14 @@ def _publish_and_return(
     severity_counts = _severity_counts(findings)
 
     if result.success:
-        observability.emit_metric(
-            "ReviewCompleted",
-            1,
-            {"repo": repo, "severity_count": str(len(findings))},
-        )
+        # Design §8 restricts ReviewCompleted to *actual* review posts.
+        # Dedup skip → success=True with review_id=None → no metric.
+        if result.review_id is not None:
+            observability.emit_metric(
+                "ReviewCompleted",
+                1,
+                {"repo": repo, "severity_count": str(len(findings))},
+            )
         observability.emit_structured_log(
             _EVENT_LOG_NAME,
             pr_url,
@@ -308,6 +339,7 @@ def _publish_and_return(
             action=action,
             token=token,
             source="review_post",
+            cached=cached,
         )
 
     # github_error path.
@@ -317,6 +349,7 @@ def _publish_and_return(
         action=action,
         head_sha=head_sha,
         reason="github_error",
+        cached=cached,
     )
     return _response(502, {"message": "github error during publish"})
 
@@ -330,6 +363,7 @@ def _handle_rate_limit(
     action: str,
     token: str | None,
     source: str,
+    cached: bool,
 ) -> dict[str, Any]:
     """Rate-limit fallback: neutral comment (best-effort), ``ReviewFailed`` metric, 200."""
     review_publisher.post_issue_comment(
@@ -352,6 +386,7 @@ def _handle_rate_limit(
         "failed",
         reason="rate_limit",
         source=source,
+        cached=cached,
     )
     return _response(200, {"message": "rate-limited"})
 
@@ -367,9 +402,15 @@ def _post_neutral_and_return(
     body: str,
     reason: str,
 ) -> dict[str, Any]:
-    """Neutral comment for empty / too-large paths; ``ReviewCompleted`` metric; 200."""
+    """Neutral comment for empty / too-large paths; log status=skipped; 200.
+
+    Deliberately does **not** emit ``ReviewCompleted``: per design.md §8,
+    that metric is reserved for actual review posts. Skipped paths (dedup,
+    empty PR, oversized PR) surface only in structured logs — operators
+    can query the ``status="skipped"`` + ``reason`` fields for
+    observability without inflating the completion count.
+    """
     review_publisher.post_issue_comment(repo, pr, body, token=token)
-    observability.emit_metric("ReviewCompleted", 1, {"repo": repo, "severity_count": "0"})
     observability.emit_structured_log(
         _EVENT_LOG_NAME,
         pr_url,
@@ -379,6 +420,7 @@ def _post_neutral_and_return(
         None,
         "skipped",
         reason=reason,
+        cached=False,
     )
     return _response(200, {"message": reason})
 
@@ -390,9 +432,15 @@ def _emit_failure(
     action: str,
     head_sha: str,
     reason: str,
+    cached: bool,
     **extra: Any,
 ) -> None:
-    """Emit ``ReviewFailed`` metric + structured failure log."""
+    """Emit ``ReviewFailed`` metric + structured failure log.
+
+    ``cached`` is required (not defaulted) so every terminal-state log
+    record carries the same schema as the success path — makes log
+    queries uniform and prevents accidental omission at call sites.
+    """
     observability.emit_metric("ReviewFailed", 1, {"repo": repo, "reason": reason})
     observability.emit_structured_log(
         _EVENT_LOG_NAME,
@@ -403,6 +451,7 @@ def _emit_failure(
         None,
         "failed",
         reason=reason,
+        cached=cached,
         **extra,
     )
 
@@ -421,10 +470,24 @@ def _severity_counts(findings: list[Finding]) -> dict[str, int]:
 
 
 def _get_body_bytes(event: dict[str, Any]) -> bytes:
-    """Extract the raw request body as bytes, honoring ``isBase64Encoded``."""
+    """Extract the raw request body as bytes, honoring ``isBase64Encoded``.
+
+    Malformed base64 input is *not* raised — we return ``b""`` so signature
+    validation fails with 401 instead of leaking a 400 that would tell an
+    attacker their probing revealed the internal decode path.
+    """
+    # The ``or ""`` guards against ``event["body"]`` being None or absent
+    # (API Gateway represents an empty body as either an empty string or a
+    # missing key, depending on the integration). Any other falsy value
+    # for ``body`` is effectively "no request payload" and reduces to the
+    # same b"" outcome.
     raw = event.get("body") or ""
     if event.get("isBase64Encoded"):
-        return base64.b64decode(raw)
+        try:
+            return base64.b64decode(raw, validate=True)
+        except (binascii.Error, ValueError):
+            logger.warning("Rejected: malformed base64 body")
+            return b""
     return raw.encode("utf-8") if isinstance(raw, str) else b""
 
 
@@ -437,11 +500,15 @@ def _lowercase_headers(event: dict[str, Any]) -> dict[str, str]:
     return {k.lower(): v for k, v in (event.get("headers") or {}).items()}
 
 
-def _response(status: int, body: dict[str, Any] | str = "") -> dict[str, Any]:
-    """Build a uniform API Gateway HTTP API v2 response."""
-    body_str = body if isinstance(body, str) else json.dumps(body)
+def _response(status: int, body: dict[str, Any]) -> dict[str, Any]:
+    """Build a uniform API Gateway HTTP API v2 response.
+
+    ``body`` is always a dict — every caller in this module passes one.
+    The helper serializes to JSON and sets ``Content-Type`` uniformly so
+    the shape is identical across success and error paths.
+    """
     return {
         "statusCode": status,
         "headers": {"Content-Type": "application/json"},
-        "body": body_str,
+        "body": json.dumps(body),
     }

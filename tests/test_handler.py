@@ -288,6 +288,55 @@ def test_signature_computed_over_base64_decoded_body(s3_bucket: Any, deps: _Hand
     assert response["statusCode"] == 200
 
 
+def test_empty_webhook_secret_returns_401_before_validation(
+    monkeypatch: pytest.MonkeyPatch, s3_bucket: Any, deps: _HandlerDeps
+) -> None:
+    """F1 regression: fail-closed when secret is not configured.
+
+    An empty key makes ``hmac.new(b"", body)`` produce a deterministic
+    digest that any attacker aware of the misconfig could forge; the
+    handler must reject the request instead of trusting the validator.
+    """
+    monkeypatch.setenv("WEBHOOK_SECRET", "")
+    monkeypatch.delenv("SECRETS_ARN", raising=False)
+    from code_review_agent import credentials
+
+    credentials._cache = None  # force fresh resolution with empty env
+
+    event = _signed_event(_sample_payload())
+    response = handler.lambda_handler(event, None)
+
+    assert response["statusCode"] == 401
+    body = json.loads(response["body"])
+    assert "not configured" in body["message"]
+    deps.fetch_pr_diff.assert_not_called()
+    deps.analyze_diff.assert_not_called()
+
+
+def test_malformed_base64_body_returns_401(s3_bucket: Any, deps: _HandlerDeps) -> None:
+    """F3 regression: a bad base64 body must not crash the handler.
+
+    ``binascii.Error`` used to propagate out of ``_get_body_bytes`` and
+    surface as an unhandled Lambda 500. Now the decode failure returns
+    ``b""``, signature validation over an empty body fails → 401 (safe
+    disclosure — no hint about *why*).
+    """
+    event = {
+        "version": "2.0",
+        "headers": {
+            "x-github-event": "pull_request",
+            "x-hub-signature-256": "sha256=deadbeef",
+        },
+        "requestContext": {"http": {"method": "POST", "path": "/webhook"}},
+        "body": "!!! not valid base64 @@@",
+        "isBase64Encoded": True,
+    }
+    response = handler.lambda_handler(event, None)
+
+    assert response["statusCode"] == 401
+    deps.fetch_pr_diff.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # Scenario 4 — malformed payload → 400
 # ---------------------------------------------------------------------------
@@ -543,6 +592,135 @@ def test_bedrock_botocore_error_returns_500(s3_bucket: Any, deps: _HandlerDeps) 
     response = handler.lambda_handler(event, None)
 
     assert response["statusCode"] == 500
+
+
+def test_bedrock_value_error_returns_500_model_config_error(
+    s3_bucket: Any, deps: _HandlerDeps
+) -> None:
+    """F2 regression: ValueError from analyze_diff must be caught.
+
+    reviewer.analyze_diff raises ValueError when BEDROCK_MODEL_ID resolves
+    to a non-Haiku value. Previously uncaught → unhandled Lambda 500 with
+    no metric or structured log. Handler now emits ReviewFailed with a
+    distinct 'model_config_error' reason so dashboards can separate infra
+    faults from config errors.
+    """
+    deps.analyze_diff.side_effect = ValueError(
+        "Only Claude Haiku models are permitted; got 'anthropic.claude-3-opus-20240229'"
+    )
+
+    event = _signed_event(_sample_payload())
+    response = handler.lambda_handler(event, None)
+
+    assert response["statusCode"] == 500
+    deps.emit_metric.assert_any_call(
+        "ReviewFailed", 1, {"repo": _REPO, "reason": "model_config_error"}
+    )
+    log_call = deps.emit_structured_log.call_args
+    assert log_call.kwargs["reason"] == "model_config_error"
+    assert log_call.kwargs["cached"] is False
+    deps.publish_review.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# F4 regression — metric contract adherence (design.md §8)
+# ---------------------------------------------------------------------------
+
+
+def _completion_metric_calls(deps: _HandlerDeps) -> list[Any]:
+    """Return every emit_metric call for ReviewCompleted, in order."""
+    return [c for c in deps.emit_metric.call_args_list if c.args and c.args[0] == "ReviewCompleted"]
+
+
+def test_dedup_hit_does_not_emit_review_completed(s3_bucket: Any, deps: _HandlerDeps) -> None:
+    """design.md §8: ReviewCompleted is 'emitted on successful review post.'"""
+    deps.analyze_diff.return_value = [_finding(line=1)]
+    deps.publish_review.return_value = review_publisher.PublishResult(
+        success=True, review_id=None, skipped_reason="dedup"
+    )
+
+    event = _signed_event(_sample_payload())
+    handler.lambda_handler(event, None)
+
+    assert _completion_metric_calls(deps) == []
+
+
+def test_too_large_pr_does_not_emit_review_completed(s3_bucket: Any, deps: _HandlerDeps) -> None:
+    deps.fetch_pr_diff.return_value = _build_multi_file_diff(51)
+
+    event = _signed_event(_sample_payload())
+    handler.lambda_handler(event, None)
+
+    assert _completion_metric_calls(deps) == []
+
+
+def test_empty_pr_does_not_emit_review_completed(s3_bucket: Any, deps: _HandlerDeps) -> None:
+    deps.fetch_pr_diff.return_value = ""
+
+    event = _signed_event(_sample_payload())
+    handler.lambda_handler(event, None)
+
+    assert _completion_metric_calls(deps) == []
+
+
+def test_successful_post_still_emits_review_completed(s3_bucket: Any, deps: _HandlerDeps) -> None:
+    """Sanity: the *actual* success path is unaffected by F4."""
+    deps.analyze_diff.return_value = [_finding(line=1, severity="warning")]
+
+    event = _signed_event(_sample_payload())
+    handler.lambda_handler(event, None)
+
+    completed = _completion_metric_calls(deps)
+    assert len(completed) == 1
+    assert completed[0].args[2] == {"repo": _REPO, "severity_count": "1"}
+
+
+# ---------------------------------------------------------------------------
+# F6 regression — cached kwarg present on every terminal log record
+# ---------------------------------------------------------------------------
+
+
+def test_diff_fetch_error_log_records_cached_false(s3_bucket: Any, deps: _HandlerDeps) -> None:
+    from code_review_agent.github_client import GitHubFetchError
+
+    deps.fetch_pr_diff.side_effect = GitHubFetchError("server error 500")
+
+    event = _signed_event(_sample_payload())
+    handler.lambda_handler(event, None)
+
+    log_call = deps.emit_structured_log.call_args
+    assert log_call.kwargs["cached"] is False
+
+
+def test_rate_limit_log_records_cached(s3_bucket: Any, deps: _HandlerDeps) -> None:
+    from code_review_agent.github_client import RateLimitError
+
+    deps.fetch_pr_diff.side_effect = RateLimitError("exhausted")
+
+    event = _signed_event(_sample_payload())
+    handler.lambda_handler(event, None)
+
+    log_call = deps.emit_structured_log.call_args
+    assert "cached" in log_call.kwargs
+    assert log_call.kwargs["cached"] is False
+
+
+def test_out_of_hunk_log_records_cached_false(s3_bucket: Any, deps: _HandlerDeps) -> None:
+    deps.analyze_diff.return_value = [_finding(line=999)]
+
+    event = _signed_event(_sample_payload())
+    handler.lambda_handler(event, None)
+
+    log_call = deps.emit_structured_log.call_args
+    assert log_call.kwargs["cached"] is False
+
+
+def test_neutral_comment_paths_log_cached_false(s3_bucket: Any, deps: _HandlerDeps) -> None:
+    """empty-PR + too-large paths both surface cached=False in the log."""
+    deps.fetch_pr_diff.return_value = ""  # empty
+    event = _signed_event(_sample_payload())
+    handler.lambda_handler(event, None)
+    assert deps.emit_structured_log.call_args.kwargs["cached"] is False
 
 
 # ---------------------------------------------------------------------------

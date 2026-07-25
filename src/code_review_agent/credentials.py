@@ -144,5 +144,5 @@ def _load_secrets() -> dict[str, str]:
         _cache = {}
         return _cache
 
-    _cache = {k: str(v) for k, v in parsed.items() if isinstance(v, str)}
+    _cache = {k: v for k, v in parsed.items() if isinstance(v, str)}
     return _cache

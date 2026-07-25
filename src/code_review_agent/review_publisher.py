@@ -371,3 +371,75 @@ def _coerce_nonneg_int(value: Any) -> int:
     except (TypeError, ValueError):
         return 0
     return max(result, 0)
+
+
+# ---------------------------------------------------------------------------
+# Issue-comment fallback (neutral comments — too large / no changes / rate limit)
+# ---------------------------------------------------------------------------
+
+
+def post_issue_comment(
+    repo: str,
+    pr: int,
+    body: str,
+    *,
+    client: httpx.Client | None = None,
+    token: str | None = None,
+) -> bool:
+    """Post a neutral issue comment on a PR — best-effort, never raises.
+
+    Used for design flows where a full review isn't appropriate:
+
+      * "PR too large" (>50 eligible files after filtering).
+      * "No changes to review" (0 eligible files).
+      * "GitHub rate limit exhausted" (rate-limit fallback from
+        :func:`publish_review`).
+
+    A single POST attempt is made — no retry. The caller has already
+    concluded that a full review is impossible; aggressively retrying a
+    fallback path (especially the rate-limit case) would defeat its
+    purpose. Any failure is logged and swallowed; the return value is a
+    boolean signal for observability, not a raise-on-failure contract.
+
+    Args:
+        repo: ``owner/name`` slug.
+        pr: Pull request number (used as the issue number — PRs and
+            issues share the same numbering space on GitHub).
+        body: Comment body (Markdown).
+        client: Optional :class:`httpx.Client` for dependency injection.
+        token: Optional GitHub App / PAT token override. Falls back to
+            ``GITHUB_TOKEN`` env var at call time.
+
+    Returns:
+        ``True`` on 2xx / 3xx, ``False`` on any transport error or 4xx/5xx.
+    """
+    close_client = False
+    if client is None:
+        client = httpx.Client(timeout=10.0)
+        close_client = True
+
+    try:
+        auth = token if token is not None else os.environ.get("GITHUB_TOKEN", "")
+        headers = _github_headers(auth)
+        url = f"{_GITHUB_API}/repos/{repo}/issues/{pr}/comments"
+
+        try:
+            response = client.post(url, json={"body": body}, headers=headers)
+        except httpx.HTTPError as e:
+            logger.warning("Issue-comment POST transport error for %s#%d: %s", repo, pr, e)
+            return False
+
+        if response.status_code < 400:
+            return True
+
+        logger.warning(
+            "Issue-comment POST returned %s for %s#%d: %s",
+            response.status_code,
+            repo,
+            pr,
+            response.text[:200],
+        )
+        return False
+    finally:
+        if close_client:
+            client.close()

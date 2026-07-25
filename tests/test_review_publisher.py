@@ -858,3 +858,165 @@ def test_post_body_carries_commit_id_and_event_comment(
     assert payload["commit_id"] == _SHA
     assert payload["event"] == "COMMENT"
     assert _dedup_marker(_SHA) in payload["body"]
+
+
+# ---------------------------------------------------------------------------
+# post_issue_comment — best-effort neutral comment
+# ---------------------------------------------------------------------------
+
+
+def _issue_comment_router(
+    *, status: int = 201, exc: Exception | None = None
+) -> Callable[[httpx.Request], httpx.Response]:
+    """Handler that only answers on the issue-comments endpoint."""
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        if exc is not None:
+            raise exc
+        expected = f"/repos/{_REPO}/issues/{_PR}/comments"
+        if request.method == "POST" and request.url.path.endswith(expected):
+            return httpx.Response(status, json={"id": 12345})
+        return httpx.Response(404, json={"message": "route not mocked"})
+
+    return _handler
+
+
+def test_post_issue_comment_returns_true_on_success() -> None:
+    from code_review_agent.review_publisher import post_issue_comment
+
+    recorder = _Recorder()
+    client = _build_client(_issue_comment_router(), recorder)
+
+    result = post_issue_comment(_REPO, _PR, "PR too large to review", client=client)
+
+    assert result is True
+    assert len(recorder.post_requests) == 1
+
+
+def test_post_issue_comment_hits_correct_endpoint_and_body() -> None:
+    from code_review_agent.review_publisher import post_issue_comment
+
+    recorder = _Recorder()
+    client = _build_client(_issue_comment_router(), recorder)
+
+    post_issue_comment(_REPO, _PR, "No changes to review", client=client)
+
+    req = recorder.post_requests[0]
+    assert str(req.url) == f"https://api.github.com/repos/{_REPO}/issues/{_PR}/comments"
+    payload = json.loads(req.content.decode("utf-8"))
+    assert payload == {"body": "No changes to review"}
+
+
+def test_post_issue_comment_returns_false_on_4xx() -> None:
+    from code_review_agent.review_publisher import post_issue_comment
+
+    recorder = _Recorder()
+    client = _build_client(_issue_comment_router(status=404), recorder)
+
+    result = post_issue_comment(_REPO, _PR, "body", client=client)
+
+    assert result is False
+    assert len(recorder.post_requests) == 1  # no retry
+
+
+def test_post_issue_comment_returns_false_on_5xx() -> None:
+    from code_review_agent.review_publisher import post_issue_comment
+
+    recorder = _Recorder()
+    client = _build_client(_issue_comment_router(status=500), recorder)
+
+    result = post_issue_comment(_REPO, _PR, "body", client=client)
+
+    assert result is False
+    assert len(recorder.post_requests) == 1  # no retry — fallback path
+
+
+def test_post_issue_comment_returns_false_on_transport_error() -> None:
+    from code_review_agent.review_publisher import post_issue_comment
+
+    recorder = _Recorder()
+    client = _build_client(_issue_comment_router(exc=httpx.ConnectError("unreachable")), recorder)
+
+    result = post_issue_comment(_REPO, _PR, "body", client=client)
+
+    assert result is False
+
+
+def test_post_issue_comment_never_raises_on_arbitrary_http_error() -> None:
+    """Regression guard: even the weirder httpx errors must not propagate."""
+    from code_review_agent.review_publisher import post_issue_comment
+
+    client = _build_client(_issue_comment_router(exc=httpx.ReadTimeout("timeout")))
+
+    # Must not raise.
+    result = post_issue_comment(_REPO, _PR, "body", client=client)
+    assert result is False
+
+
+def test_post_issue_comment_authorization_from_kwarg() -> None:
+    from code_review_agent.review_publisher import post_issue_comment
+
+    recorder = _Recorder()
+    client = _build_client(_issue_comment_router(), recorder)
+
+    post_issue_comment(
+        _REPO,
+        _PR,
+        "body",
+        client=client,
+        token="test-token",  # noqa: S106 -- test literal
+    )
+
+    assert recorder.post_requests[0].headers.get("Authorization") == "Bearer test-token"
+
+
+def test_post_issue_comment_authorization_from_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from code_review_agent.review_publisher import post_issue_comment
+
+    monkeypatch.setenv("GITHUB_TOKEN", "env-token")
+    recorder = _Recorder()
+    client = _build_client(_issue_comment_router(), recorder)
+
+    post_issue_comment(_REPO, _PR, "body", client=client)
+
+    assert recorder.post_requests[0].headers.get("Authorization") == "Bearer env-token"
+
+
+def test_post_issue_comment_no_auth_when_token_unset() -> None:
+    from code_review_agent.review_publisher import post_issue_comment
+
+    recorder = _Recorder()
+    client = _build_client(_issue_comment_router(), recorder)
+
+    post_issue_comment(_REPO, _PR, "body", client=client)
+
+    assert "Authorization" not in recorder.post_requests[0].headers
+
+
+def test_post_issue_comment_creates_and_closes_client_when_none_provided(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from code_review_agent import review_publisher
+
+    close_calls = {"n": 0}
+    real_client_cls = httpx.Client
+
+    def factory(*_args: Any, **_kwargs: Any) -> httpx.Client:
+        c = real_client_cls(transport=httpx.MockTransport(_issue_comment_router()))
+        original_close = c.close
+
+        def _tracked_close() -> None:
+            close_calls["n"] += 1
+            original_close()
+
+        c.close = _tracked_close  # type: ignore[method-assign]
+        return c
+
+    monkeypatch.setattr("code_review_agent.review_publisher.httpx.Client", factory)
+
+    result = review_publisher.post_issue_comment(_REPO, _PR, "body")
+
+    assert result is True
+    assert close_calls["n"] == 1

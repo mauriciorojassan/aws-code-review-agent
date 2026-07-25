@@ -9,23 +9,27 @@
 
 **Status:** Wave 1 gate passed at 97% coverage, ruff/black clean, sam validate clean (commit 4be4906).
 
-## Wave 2: Validation and Filtering (depends on Wave 1)
+## Wave 2: Validation and Filtering (completed)
 
-- [ ] **T2.1** Create `src/code_review_agent/webhook_validator.py` — HMAC-SHA256 signature validation, event header filter (`X-GitHub-Event: pull_request`), action filter (`opened`, `synchronize`).
-- [ ] **T2.2** Create `tests/test_webhook_validator.py` — Unit tests for signature validation (valid, invalid, missing), event filtering, action filtering.
-- [ ] **T2.3** Create `src/code_review_agent/diff_filter.py` — Eligibility filter with denylist (`*.lock`, `*.min.*`, package-lock, yarn.lock, poetry.lock, Cargo.lock, binary detection). Returns `EligibleDiff` dataclass with content, excluded list, counts, `too_large` flag (>50), `is_empty` flag (0 files).
-- [ ] **T2.4** Create `tests/test_diff_filter.py` — Unit tests for denylist matching, binary detection, eligible count logic, edge cases (all excluded, all eligible, exactly 50).
-- [ ] **T2.5** Create `src/code_review_agent/diff_parser.py` — Unified diff hunk parser. `parse_unified_diff(diff: str) -> dict[str, list[HunkRange]]` extracts right-side line ranges from `@@` markers. `validate_finding(finding, hunk_map) -> bool` checks if finding's file and line fall within valid `+` hunks.
-- [ ] **T2.6** Create `tests/test_diff_parser.py` — Unit tests for hunk parsing (single file, multi-file, edge cases), finding validation (valid, out-of-range, non-existent file, line < 1).
+- [x] **T2.1** Create `src/code_review_agent/webhook_validator.py` — HMAC-SHA256 signature validation, event header filter (`X-GitHub-Event: pull_request`), action filter (`opened`, `synchronize`).
+- [x] **T2.2** Create `tests/test_webhook_validator.py` — Unit tests for signature validation (valid, invalid, missing), event filtering, action filtering.
+- [x] **T2.3** Create `src/code_review_agent/diff_filter.py` — Eligibility filter with denylist (`*.lock`, `*.min.*`, package-lock, yarn.lock, poetry.lock, Cargo.lock, binary detection). Returns `EligibleDiff` dataclass with content, excluded list, counts, `too_large` flag (>50), `is_empty` flag (0 files).
+- [x] **T2.4** Create `tests/test_diff_filter.py` — Unit tests for denylist matching, binary detection, eligible count logic, edge cases (all excluded, all eligible, exactly 50).
+- [x] **T2.5** Create `src/code_review_agent/diff_parser.py` — Unified diff hunk parser. `parse_unified_diff(diff: str) -> dict[str, list[HunkRange]]` extracts right-side line ranges from `@@` markers. `validate_finding(finding, hunk_map) -> bool` checks if finding's file and line fall within valid `+` hunks.
+- [x] **T2.6** Create `tests/test_diff_parser.py` — Unit tests for hunk parsing (single file, multi-file, edge cases), finding validation (valid, out-of-range, non-existent file, line < 1).
 
-## Wave 3: Analysis and Review Logic (depends on Wave 2)
+**Status:** Wave 2 gate passed at 100% coverage on `webhook_validator.py`, `diff_filter.py`, and `diff_parser.py` (primary commits: f30a450 webhook validator, aa7f6f2 diff filter, 4c61c18 diff parser; follow-up hardening: d2a1062 signature timing-leak fix, e7f1909 diff-filter regex fix).
 
-- [ ] **T3.1** Update `src/code_review_agent/reviewer.py` — Add `BEDROCK_MODEL_ID` env var support with default `anthropic.claude-3-haiku-20240307`. Add model validation: reject non-Haiku models with `ValueError` before invocation. Update `analyze_diff(diff: str, model_id: str = ...)` signature.
-- [ ] **T3.2** Create `tests/test_reviewer.py` — Unit tests mocking Bedrock responses with `moto` or direct `botocore.stub.Stubber`. Test: successful parse, non-Haiku rejection, Bedrock error handling, malformed JSON response, line < 1 filtering.
-- [ ] **T3.3** Create `src/code_review_agent/review_publisher.py` — `publish_review(repo, pr, head_sha, findings, summary_data) -> PublishResult`. Logic: dedup check (query existing reviews for marker), sort findings by severity priority, cap at 20 inline comments, overflow to body, build review body with counts/marker/excluded-file-count, handle GitHub rate-limit 403, retry once on other failures.
-- [ ] **T3.4** Create `tests/test_review_publisher.py` — Unit tests with `httpx` mocked GitHub API. Test: dedup hit, <20 findings, >20 findings (overflow), rate-limit 403, GitHub error + retry, successful post.
-- [ ] **T3.5** Create `src/code_review_agent/observability.py` — `emit_structured_log(...)` for JSON CloudWatch logs, `emit_metric(...)` for CloudWatch custom metrics (`ReviewCompleted`, `ReviewFailed`).
-- [ ] **T3.6** Create `tests/test_observability.py` — Unit tests with moto CloudWatch Logs and CloudWatch mocks. Verify log schema and metric emission.
+## Wave 3: Analysis and Review Logic (completed)
+
+- [x] **T3.1** Update `src/code_review_agent/reviewer.py` — Add `BEDROCK_MODEL_ID` env var support with default `anthropic.claude-3-haiku-20240307`. Add model validation: reject non-Haiku models with `ValueError` before invocation. Update `analyze_diff(diff: str, model_id: str = ...)` signature.
+- [x] **T3.2** Create `tests/test_reviewer.py` — Unit tests mocking Bedrock responses with `moto` or direct `botocore.stub.Stubber`. Test: successful parse, non-Haiku rejection, Bedrock error handling, malformed JSON response, line < 1 filtering.
+- [x] **T3.3** Create `src/code_review_agent/review_publisher.py` — `publish_review(repo, pr, head_sha, findings, summary_data) -> PublishResult`. Logic: dedup check (query existing reviews for marker), sort findings by severity priority, cap at 20 inline comments, overflow to body, build review body with counts/marker/excluded-file-count, handle GitHub rate-limit 403, retry once on other failures.
+- [x] **T3.4** Create `tests/test_review_publisher.py` — Unit tests with `httpx` mocked GitHub API. Test: dedup hit, <20 findings, >20 findings (overflow), rate-limit 403, GitHub error + retry, successful post.
+- [x] **T3.5** Create `src/code_review_agent/observability.py` — `emit_structured_log(...)` for JSON CloudWatch logs, `emit_metric(...)` for CloudWatch custom metrics (`ReviewCompleted`, `ReviewFailed`).
+- [x] **T3.6** Create `tests/test_observability.py` — Unit tests with moto CloudWatch Logs and CloudWatch mocks. Verify log schema and metric emission.
+
+**Status:** Wave 3 gate passed at 100% coverage on `reviewer.py`, `review_publisher.py`, and `observability.py` after judgment-day hardening (primary commits: c4af900 reviewer, d6a7d87 review publisher, 3796d4e observability; hardening: 14df58b judgment-day fixes covering BotoCoreError swallow, GitHub 429/Retry-After rate-limit widening, Bedrock timeout config, `Finding.line = Field(gt=0)`).
 
 ## Wave 4: Handler Orchestration and Integration (depends on Wave 3)
 

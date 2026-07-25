@@ -44,13 +44,13 @@ from __future__ import annotations
 import base64
 import json
 import logging
-import os
 from typing import Any
 
 from botocore.exceptions import BotoCoreError, ClientError
 from pydantic import ValidationError
 
 from code_review_agent import (
+    credentials,
     diff_cache,
     diff_filter,
     diff_parser,
@@ -85,7 +85,7 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
 
     # Step 1: signature validation. Runs before JSON parse so a malformed
     # body still yields a proper 401 rather than a 400.
-    secret = os.environ.get("WEBHOOK_SECRET", "").encode("utf-8")
+    secret = credentials.get_webhook_secret()
     signature = headers.get("x-hub-signature-256")
     if not webhook_validator.validate_signature(secret, body_bytes, signature):
         logger.warning("Rejected: invalid webhook signature")
@@ -116,7 +116,7 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
     head_sha = payload.pull_request.head.sha
     pr_url = f"https://github.com/{repo}/pull/{pr}"
     action = payload.action
-    token = os.environ.get("GITHUB_TOKEN") or None
+    token = credentials.get_github_token()
 
     # Step 5: analysis-cache hit → skip fetch + filter + Bedrock + hunk
     # validation. Publish (with dedup check) still runs — cache-hit + dedup

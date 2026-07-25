@@ -1,6 +1,6 @@
 # Code Review Agent 🤖
 
-[![CI](https://github.com/mrs/hackkiroaws/actions/workflows/ci.yml/badge.svg)](https://github.com/mrs/hackkiroaws/actions/workflows/ci.yml)
+[![CI](https://github.com/mauriciorojassan/hackkiroaws/actions/workflows/ci.yml/badge.svg)](https://github.com/mauriciorojassan/hackkiroaws/actions/workflows/ci.yml)
 
 Automated GitHub PR reviewer powered by Amazon Bedrock (Claude 3 Haiku).
 

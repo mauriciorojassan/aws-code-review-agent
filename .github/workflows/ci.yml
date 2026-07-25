@@ -65,4 +65,4 @@ jobs:
       # Python 3.12 interpreter provisioned above — a resolution failure
       # here is a real signal that the deployment package is broken.
       - name: SAM build (verifies src/requirements.txt resolves)
-        run: sam build --use-container=false
+        run: sam build

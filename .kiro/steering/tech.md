@@ -54,7 +54,7 @@ pytest --cov=code_review_agent --cov-fail-under=99
 ruff check src/ tests/ mcp_server/
 black --check src/ tests/ mcp_server/
 sam validate --lint
-sam build --use-container=false   # verifies src/requirements.txt resolves
+sam build   # verifies src/requirements.txt resolves
 ```
 
 For end-to-end smoke tests (direct-Python + `sam local invoke`), see

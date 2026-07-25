@@ -1,0 +1,22 @@
+{
+  "version": "2.0",
+  "routeKey": "POST /webhook",
+  "rawPath": "/webhook",
+  "rawQueryString": "",
+  "headers": {
+    "content-type": "application/json",
+    "user-agent": "GitHub-Hookshot/abc123",
+    "x-github-delivery": "12345678-1234-1234-1234-123456789abc",
+    "x-github-event": "pull_request",
+    "x-hub-signature-256": "sha256=330b435bff1f044a9e287f4c8efd40701c5041fcd46cfdbf175043de59bfaeb4"
+  },
+  "requestContext": {
+    "http": {
+      "method": "POST",
+      "path": "/webhook",
+      "protocol": "HTTP/1.1"
+    }
+  },
+  "body": "{\"action\": \"opened\", \"repository\": {\"full_name\": \"octocat/Hello-World\", \"name\": \"Hello-World\", \"owner\": {\"login\": \"octocat\"}}, \"pull_request\": {\"number\": 42, \"title\": \"Add a friendly banner to README\", \"head\": {\"sha\": \"abc123def456789012345678901234567890abcd\", \"ref\": \"feature/banner\"}, \"diff_url\": \"https://github.com/octocat/Hello-World/pull/42.diff\"}}",
+  "isBase64Encoded": false
+}

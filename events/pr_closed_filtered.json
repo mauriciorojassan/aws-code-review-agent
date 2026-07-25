@@ -1,0 +1,18 @@
+{
+  "version": "2.0",
+  "routeKey": "POST /webhook",
+  "rawPath": "/webhook",
+  "headers": {
+    "content-type": "application/json",
+    "x-github-event": "pull_request",
+    "x-hub-signature-256": "sha256=21f15d07397cdaa82c3303b41c5a24673943ebe5c59b73cbb5e1efc2e6257e4e"
+  },
+  "requestContext": {
+    "http": {
+      "method": "POST",
+      "path": "/webhook"
+    }
+  },
+  "body": "{\"action\": \"closed\", \"repository\": {\"full_name\": \"octocat/Hello-World\", \"name\": \"Hello-World\", \"owner\": {\"login\": \"octocat\"}}, \"pull_request\": {\"number\": 42, \"title\": \"Closed PR\", \"head\": {\"sha\": \"abc123def456789012345678901234567890abcd\", \"ref\": \"feature/x\"}}}",
+  "isBase64Encoded": false
+}

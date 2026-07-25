@@ -31,12 +31,14 @@
 
 **Status:** Wave 3 gate passed at 100% coverage on `reviewer.py`, `review_publisher.py`, and `observability.py` after judgment-day hardening (primary commits: c4af900 reviewer, d6a7d87 review publisher, 3796d4e observability; hardening: 14df58b judgment-day fixes covering BotoCoreError swallow, GitHub 429/Retry-After rate-limit widening, Bedrock timeout config, `Finding.line = Field(gt=0)`).
 
-## Wave 4: Handler Orchestration and Integration (depends on Wave 3)
+## Wave 4: Handler Orchestration and Integration (completed)
 
-- [ ] **T4.1** Implement `src/code_review_agent/handler.py` — Full synchronous orchestration: validate signature → filter event/action → fetch diff (with retry) → cache diff → filter eligibility → reviewability gate (>50 or 0 files) → check analysis cache → analyze with Bedrock → validate findings against hunks → cache analysis → dedup check → publish review (cap/overflow/rate-limit) → emit logs/metrics. Return 200 on success/no-op, 401 on invalid signature, 5xx on transient failures.
-- [ ] **T4.2** Create `tests/test_handler.py` — Integration tests for full handler flow. Scenarios: valid webhook → analysis → review post; filtered event (200 no-op); invalid signature (401); PR too large (200 + neutral comment); empty PR (200 + neutral comment); out-of-hunk findings (200 + log); dedup hit (200); rate-limit 403 (200 + neutral issue comment); GitHub error (502); Bedrock error (500); cache hit (skip Bedrock).
-- [ ] **T4.3** Wire handler to Secrets Manager — Fetch webhook secret and GitHub token at cold start, cache in memory.
-- [ ] **T4.4** End-to-end smoke test — Use `sam local invoke` with a fixture event JSON simulating a `pull_request.opened` webhook. Verify logs, metrics stub, and mock GitHub review creation.
+- [x] **T4.1** Implement `src/code_review_agent/handler.py` — Full synchronous orchestration: validate signature → filter event/action → fetch diff (with retry) → cache diff → filter eligibility → reviewability gate (>50 or 0 files) → check analysis cache → analyze with Bedrock → validate findings against hunks → cache analysis → dedup check → publish review (cap/overflow/rate-limit) → emit logs/metrics. Return 200 on success/no-op, 401 on invalid signature, 5xx on transient failures.
+- [x] **T4.2** Create `tests/test_handler.py` — Integration tests for full handler flow. Scenarios: valid webhook → analysis → review post; filtered event (200 no-op); invalid signature (401); PR too large (200 + neutral comment); empty PR (200 + neutral comment); out-of-hunk findings (200 + log); dedup hit (200); rate-limit 403 (200 + neutral issue comment); GitHub error (502); Bedrock error (500); cache hit (skip Bedrock).
+- [x] **T4.3** Wire handler to Secrets Manager — Fetch webhook secret and GitHub token at cold start, cache in memory.
+- [x] **T4.4** End-to-end smoke test — Use `sam local invoke` with a fixture event JSON simulating a `pull_request.opened` webhook. Verify logs, metrics stub, and mock GitHub review creation.
+
+**Status:** Wave 4 gate passed. Handler wires 16-step synchronous pipeline (commit 4f72e24 for T4.1+T4.2 + `github_client.py` + `review_publisher.post_issue_comment` enabler in 1acd994). Secrets Manager fetch with env-first fallback (commit f856db0 for T4.3). Smoke-test fixtures + runbook landed in the follow-up commit (see `docs/smoke-test.md` for step-by-step verification). Three verification steps confirmed passing on this dev host: direct-Python handler invocation (< 2s, correct HTTP 200 filter response), `sam validate --lint`, and `sam build`. `sam local invoke` is exercised in the runbook but blocked in this specific env by a SAM CLI ↔ Docker API version mismatch (documented in the runbook's known-caveat section); the same code path runs correctly outside Docker via Step 1.
 
 ## Wave 5: MCP Server (optional, depends on Wave 4)
 

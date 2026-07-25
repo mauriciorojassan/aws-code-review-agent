@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Lint, test, and validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Match the Lambda runtime pinned in template.yaml + mise.toml so
+      # CI failures reproduce locally under the same interpreter.
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements.txt
+            src/requirements.txt
+
+      - name: Install project (editable) + dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[dev]'
+
+      - name: Ruff (lint)
+        run: ruff check src/ tests/ mcp_server/
+
+      - name: Black (format check)
+        run: black --check src/ tests/ mcp_server/
+
+      # --cov-fail-under=98 protects against real regressions without
+      # tripping on the diff_cache.py exception-path gap that we've
+      # deliberately accepted (88%). Developer local gate is stricter
+      # (near-100% per touched module, ≥ 99% total display).
+      - name: Pytest with coverage
+        run: pytest --cov=code_review_agent --cov-report=term-missing --cov-fail-under=98
+
+      - name: Set up SAM CLI
+        uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: SAM template validation
+        run: sam validate --lint

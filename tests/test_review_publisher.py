@@ -1035,10 +1035,14 @@ class TestEscapeMarkdown:
         assert _escape_markdown("") == ""
 
     def test_none_input_returns_empty_string(self) -> None:
-        """JD Round 1 F1: return type contract says ``-> str``, so None in
-        must yield ``""`` out, not None passthrough."""
-        # type: ignore[arg-type] on the None literal — this is exactly the
-        # accidental-Optional[str] scenario the defensive guard exists for.
+        """JD Round 1 F1 / Round 2 F20 defensive backstop.
+
+        The type signature is strict ``text: str``, so ``None`` in is a
+        type-checker error — the ``# type: ignore`` on the argument is
+        deliberate: this test asserts the *defensive* falsy-guard behavior
+        that protects future call sites from crashing on an accidental
+        ``Optional[str]``. Return type remains ``str``.
+        """
         assert _escape_markdown(None) == ""  # type: ignore[arg-type]
 
     def test_normal_prose_unchanged(self) -> None:

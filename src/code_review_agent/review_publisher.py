@@ -406,12 +406,15 @@ def _escape_markdown(text: str) -> str:
        renderer changes and against LLM output that happens to include a
        markdown-like separator pattern.
 
-    Empty input is returned as ``""`` — never ``None``. Callers can rely
-    on the return being a real ``str`` even if they pass an ``Optional[str]``
-    that resolves to ``None`` (defensive: the caller-side guards in
-    ``_finding_to_comment`` / ``_build_review_body`` already prevent this
-    today, but tightening the return contract closes the JD Round 1 F1
-    gap for any future call sites).
+    The type signature is strict: ``text: str``. The falsy-input check
+    is a *defensive backstop* against invalid callers (e.g., a future
+    call site that carelessly bypasses type checking with an accidental
+    ``Optional[str]``), not a documented ``Optional[str]`` contract.
+    Any falsy input — including ``None``, ``""``, ``0``, ``False`` —
+    returns ``""``, so the return value can always be spliced into an
+    f-string without special-casing. Callers that legitimately need
+    ``None`` handling must guard at their own layer; the return type
+    remains ``str``.
     """
     if not text:
         return ""

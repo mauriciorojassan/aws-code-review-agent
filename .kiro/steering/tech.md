@@ -1,7 +1,8 @@
 # Tech — Code Review Agent
 
 ## Runtime
-- Python 3.12+ (project targets `py312`; CI uses 3.13).
+- Python 3.12+ (project targets `py312`).
+- **CI matrix**: Python 3.12 only — matches the Lambda runtime pinned in `template.yaml` + `mise.toml`. Host dev machines can run 3.13 (or later); the local gate still passes there because ruff/black/pytest behave identically across 3.12 and 3.13.
 - AWS Lambda (ARM64, 256 MB, 30-second timeout).
 
 ## Infrastructure
@@ -20,12 +21,13 @@
 - **MCP Python SDK** — stdio transport server in `mcp_server/server.py` exposes `read_pr_diff` and `post_review_comment`. Not on the v1 execution path (see `product.md`). Retained for future local/IDE reviewer integrations.
 
 ## Quality & CI
-- **pytest** + **pytest-cov** — 99% total coverage on Wave 1–3 modules; every src module has a peer `test_*.py`.
-- **moto** — mocks all AWS calls (S3, CloudWatch, CloudWatch Logs). Zero real AWS traffic in tests.
-- **httpx.MockTransport** — HTTP-level GitHub mocking for `review_publisher.py` tests.
+- **pytest** + **pytest-cov** — 100% coverage on all Wave 1–4 src modules except `diff_cache.py` (88%, exception paths not exercised). Total src coverage 98.56%; project-wide (src + tests) 99%.
+- **moto** — mocks all AWS calls (S3, Secrets Manager, CloudWatch, CloudWatch Logs). Zero real AWS traffic in tests.
+- **httpx.MockTransport** — HTTP-level GitHub mocking for `github_client.py` + `review_publisher.py` tests.
 - **ruff** — linter with `E, F, I, N, W, UP, S, B, A, C4, PT` rule sets enabled.
 - **black** — formatter, `line-length=100`, `target-version=py312`.
-- Test-suite gate: `pytest --cov` + `ruff check` + `black --check` before every commit.
+- **GitHub Actions** — `.github/workflows/ci.yml` runs the same gate on every push + PR to `main`. Python 3.12, concurrency cancellation, pip caching keyed on both `requirements.txt` and `pyproject.toml`. Coverage floor `--cov-fail-under=98` catches real regressions without tripping on the accepted `diff_cache.py` gap.
+- Test-suite gate (local, before every commit): `pytest --cov` + `ruff check` + `black --check` + `sam validate --lint`.
 
 ## Key Libraries
 - `boto3` — AWS SDK (S3, Bedrock Runtime, CloudWatch).
@@ -47,11 +49,12 @@
 # Install dev dependencies (editable + optional dev group)
 pip install -e ".[dev]"
 
-# Run the full gate
-pytest --cov
+# Run the full gate — matches CI
+pytest --cov=code_review_agent --cov-fail-under=98
 ruff check src/ tests/ mcp_server/
 black --check src/ tests/ mcp_server/
-
-# Local Lambda invoke (once handler is wired in Wave 4)
-sam build && sam local invoke ReviewFunction --event events/pr_opened.json
+sam validate --lint
 ```
+
+For end-to-end smoke tests (direct-Python + `sam build` + `sam local invoke`),
+see `docs/smoke-test.md`. For AWS deployment, see `docs/deployment.md`.

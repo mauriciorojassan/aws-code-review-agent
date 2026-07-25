@@ -37,6 +37,6 @@ An MCP stdio server exposing `read_pr_diff` and `post_review_comment` lives in `
 ## Success Signals (v1)
 
 - End-to-end latency < 30s at p95 on a typical PR (US-1 NFR).
-- Zero real AWS calls in the test suite (moto everywhere).
-- ≥ 80% test coverage on core modules (currently 99% on Wave 1–3).
+- Zero real AWS calls in the test suite (moto everywhere, including Secrets Manager).
+- ≥ 80% test coverage on core modules (currently 100% on all Wave 1–4 src modules except `diff_cache.py` at 88%; 98.56% src total).
 - CloudWatch alarm on daily Bedrock invocation count > 100 never fires under normal development traffic.

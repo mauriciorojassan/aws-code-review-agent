@@ -24,15 +24,33 @@ logger = logging.getLogger(__name__)
 
 # Default model when ``BEDROCK_MODEL_ID`` is not set. Mirrors the value
 # documented in ``design.md`` §1 and the ``template.yaml`` env block.
-_DEFAULT_MODEL_ID = "anthropic.claude-3-haiku-20240307"
+# This is the geographic cross-region inference profile id (not a foundation
+# model id). ``InvokeModel`` must be called with the profile id; the IAM
+# policy routes the call to the underlying
+# ``anthropic.claude-haiku-4-5-20251001-v1:0`` foundation model in
+# us-east-1 / us-east-2 / us-west-2.
+_DEFAULT_MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 
 # Accepted Haiku family variants:
-#   - anthropic.claude-3-haiku* (any sub-version)
-#   - anthropic.claude-3-5-haiku* (any sub-version)
-#   - anthropic.claude-3-7-haiku* (any sub-version)
+#   - anthropic.claude-3-haiku* (3.0, any sub-version)
+#   - anthropic.claude-3-5-haiku* (3.5, any sub-version)
+#   - anthropic.claude-3-7-haiku* (3.7, any sub-version)
+#   - anthropic.claude-haiku-4-5* (Haiku 4.5 foundation model id)
+#   - us.anthropic.claude-haiku-4-5* (Haiku 4.5 geographic cross-region
+#     inference profile id)
+#   - global.anthropic.claude-haiku-4-5* (Haiku 4.5 global cross-region
+#     inference profile id)
 # Anchored at the start of the id so ARN-style overrides that merely embed
-# ``anthropic.claude-3-haiku`` as a substring are rejected.
-_HAIKU_RE = re.compile(r"^anthropic\.claude-3(-5|-7)?-haiku")
+# a Haiku id as a substring (e.g.
+# ``arn:aws:bedrock:...:foundation-model/anthropic.claude-3-haiku``) are
+# rejected. The inference-profile prefix (``us.`` / ``global.``) is only
+# accepted for Haiku 4.5; Sonnet, Opus, Meta, and bare ARN forms remain
+# rejected.
+_HAIKU_RE = re.compile(
+    r"^(us|global)\.anthropic\.claude-haiku-4-5|"
+    r"^anthropic\.claude-haiku-4-5|"
+    r"^anthropic\.claude-3(-5|-7)?-haiku"
+)
 
 # Sentinel used to distinguish "caller omitted the argument" (→ resolve from
 # env var) from "caller explicitly passed ``None`` / empty" (→ ValueError).
@@ -57,15 +75,25 @@ _client: Any | None = None
 def _resolve_model_id() -> str:
     """Return the effective model id from the ``BEDROCK_MODEL_ID`` env var.
 
-    Falls back to :data:`_DEFAULT_MODEL_ID` when the variable is unset or
-    empty. Resolution happens at call time so tests and Lambda cold starts
-    both see the current environment.
+    Falls back to :data:`_DEFAULT_MODEL_ID` (the Haiku 4.5 geographic
+    cross-region inference profile id
+    ``us.anthropic.claude-haiku-4-5-20251001-v1:0``) when the variable is
+    unset or empty. Resolution happens at call time so tests and Lambda
+    cold starts both see the current environment.
     """
     return os.environ.get("BEDROCK_MODEL_ID") or _DEFAULT_MODEL_ID
 
 
 def _validate_model_id(model_id: Any) -> str:
     """Reject any model id that is not a Claude Haiku variant.
+
+    Accepts the Haiku 3.x family (``anthropic.claude-3-haiku*``,
+    ``anthropic.claude-3-5-haiku*``, ``anthropic.claude-3-7-haiku*``) and
+    the Haiku 4.5 family in both foundation-model form
+    (``anthropic.claude-haiku-4-5*``) and geographic / global cross-region
+    inference profile form (``us.anthropic.claude-haiku-4-5*``,
+    ``global.anthropic.claude-haiku-4-5*``). Sonnet, Opus, Meta, and
+    ARN-embedded ids are rejected.
 
     Raises :class:`ValueError` on ``None``, non-string, empty, or whitespace
     input, and on any model id that does not match :data:`_HAIKU_RE`.
@@ -106,8 +134,9 @@ def analyze_diff(diff: str, model_id: Any = _UNSET) -> list[Finding]:
         diff: Unified diff content.
         model_id: Bedrock model identifier. When omitted, resolved from the
             ``BEDROCK_MODEL_ID`` env var (default
-            ``anthropic.claude-3-haiku-20240307``). Explicit ``None``, empty
-            string, whitespace-only, or non-Haiku values raise
+            ``us.anthropic.claude-haiku-4-5-20251001-v1:0``, the Haiku 4.5
+            geographic cross-region inference profile). Explicit ``None``,
+            empty string, whitespace-only, or non-Haiku values raise
             :class:`ValueError` before any Bedrock call is made.
 
     Returns:

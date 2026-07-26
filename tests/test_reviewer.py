@@ -25,7 +25,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from code_review_agent import reviewer
 from code_review_agent.models import Finding
 
-_HAIKU_DEFAULT = "anthropic.claude-3-haiku-20240307"
+_HAIKU_DEFAULT = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 
 
 # ---------------------------------------------------------------------------
@@ -92,6 +92,10 @@ def stub_client() -> MagicMock:
         "anthropic.claude-3-5-haiku-20241022",
         "anthropic.claude-3-5-haiku-v1:0",
         "anthropic.claude-3-7-haiku-20250101",
+        # Haiku 4.5 family — foundation form and cross-region inference profiles.
+        "anthropic.claude-haiku-4-5-20251001-v1:0",
+        "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "global.anthropic.claude-haiku-4-5-20251001-v1:0",
     ],
 )
 def test_analyze_diff_accepts_haiku_variants(stub_client: MagicMock, model_id: str) -> None:
@@ -111,6 +115,9 @@ def test_analyze_diff_accepts_haiku_variants(stub_client: MagicMock, model_id: s
         "anthropic.claude-3-5-opus-20250101",
         "meta.llama3-8b-instruct-v1:0",
         "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-haiku",
+        "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0",
+        # Synthetic non-existent Haiku id — real Claude Haiku 4.5 uses the
+        # ``claude-haiku-4-5`` notch; ``claude-4-haiku`` never existed.
         "anthropic.claude-4-haiku-20260101",
     ],
 )

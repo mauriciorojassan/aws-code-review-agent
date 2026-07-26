@@ -22,7 +22,7 @@
 
 ## Wave 3: Analysis and Review Logic (completed)
 
-- [x] **T3.1** Update `src/code_review_agent/reviewer.py` — Add `BEDROCK_MODEL_ID` env var support with default `anthropic.claude-3-haiku-20240307`. Add model validation: reject non-Haiku models with `ValueError` before invocation. Update `analyze_diff(diff: str, model_id: str = ...)` signature.
+- [x] **T3.1** Update `src/code_review_agent/reviewer.py` — Add `BEDROCK_MODEL_ID` env var support with default `us.anthropic.claude-haiku-4-5-20251001-v1:0` (Haiku 4.5 geographic cross-region inference profile). Add model validation: reject non-Haiku models with `ValueError` before invocation; accepted family is Haiku 3.x (`anthropic.claude-3-haiku*`, `anthropic.claude-3-5-haiku*`, `anthropic.claude-3-7-haiku*`), Haiku 4.5 foundation (`anthropic.claude-haiku-4-5*`), and Haiku 4.5 cross-region inference profile ids (`us.anthropic.claude-haiku-4-5*`, `global.anthropic.claude-haiku-4-5*`). Haiku 4.5 inference profile support was added when AWS gated Claude 3 Haiku as LEGACY in some accounts. Update `analyze_diff(diff: str, model_id: str = ...)` signature.
 - [x] **T3.2** Create `tests/test_reviewer.py` — Unit tests mocking Bedrock responses with `moto` or direct `botocore.stub.Stubber`. Test: successful parse, non-Haiku rejection, Bedrock error handling, malformed JSON response, line < 1 filtering.
 - [x] **T3.3** Create `src/code_review_agent/review_publisher.py` — `publish_review(repo, pr, head_sha, findings, summary_data) -> PublishResult`. Logic: dedup check (query existing reviews for marker), sort findings by severity priority, cap at 20 inline comments, overflow to body, build review body with counts/marker/excluded-file-count, handle GitHub rate-limit 403, retry once on other failures.
 - [x] **T3.4** Create `tests/test_review_publisher.py` — Unit tests with `httpx` mocked GitHub API. Test: dedup hit, <20 findings, >20 findings (overflow), rate-limit 403, GitHub error + retry, successful post.
@@ -63,7 +63,7 @@
 - `ruff check src/ tests/ mcp_server/` and `black --check src/ tests/ mcp_server/` pass with zero findings.
 - `sam validate --lint` passes on `template.yaml`.
 - Cost governance constraints verified:
-  - Only `anthropic.claude-3-haiku` model permitted (test with non-Haiku ID → `ValueError`).
+  - Only Claude Haiku model permitted (Haiku 3.x `anthropic.claude-3-haiku*` / `anthropic.claude-3-5-haiku*` / `anthropic.claude-3-7-haiku*`, Haiku 4.5 foundation `anthropic.claude-haiku-4-5*`, Haiku 4.5 `us.`/`global.` inference profile ids); test with non-Haiku ID → `ValueError`.
   - Analysis cache hit avoids Bedrock re-invocation (verified in `test_handler.py`).
   - CloudWatch alarm configured for >100 daily invocations (present in `template.yaml`).
 - Structured logging emits all required fields (`pr_url`, `repo`, `action`, `head_sha`, `review_id`, `status`).
@@ -90,7 +90,7 @@ The following table maps each Acceptance Criterion in `requirements.md` to the t
 | US-2 | PR >50 eligible files → no Bedrock, neutral comment | T2.3 (too_large flag), T4.1 | T2.4, T4.2 (too large scenario) |
 | US-2 | PR 0 files → neutral "no changes" comment | T2.3 (is_empty flag), T4.1 | T2.4, T4.2 (empty scenario) |
 | US-3 | Sends eligible diff to Bedrock Haiku | T3.1 (reviewer), T4.1 | T3.2, T4.2 |
-| US-3 | Reads `BEDROCK_MODEL_ID`, defaults to Haiku, rejects non-Haiku | T3.1 | T3.2 (non-Haiku rejection test) |
+| US-3 | Reads `BEDROCK_MODEL_ID`, defaults to Haiku 4.5 inference profile, rejects non-Haiku | T3.1 | T3.2 (non-Haiku rejection test) |
 | US-3 | Truncates at 100 hunks if oversized | T4.1 (orchestration) | T4.2 (edge case) |
 | US-3 | Response schema with file, line, severity, message, suggestion | T3.1 (reviewer parse) | T3.2 |
 | US-3 | `line` >= 1; drops findings with line < 1 | T3.1, T2.5 (validator) | T3.2, T2.6 |

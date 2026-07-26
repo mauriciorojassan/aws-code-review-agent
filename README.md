@@ -8,7 +8,7 @@ Automated GitHub PR reviewer powered by Amazon Bedrock (Claude 3 Haiku).
 
 1. Receives GitHub PR webhooks (`pull_request` events: `opened`, `synchronize`, `reopened`).
 2. Fetches the diff via the GitHub REST API.
-3. Analyzes changes with Bedrock Claude 3 Haiku (`anthropic.claude-3-haiku-20240307`).
+3. Analyzes changes with Bedrock Claude Haiku 4.5 via the geographic cross-region inference profile `us.anthropic.claude-haiku-4-5-20251001-v1:0` (AWS auto-routes across US regions).
 4. Posts a summary + inline review comments back to the PR.
 
 ## Architecture

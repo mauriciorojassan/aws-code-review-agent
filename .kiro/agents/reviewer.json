@@ -1,7 +1,7 @@
 {
   "name": "reviewer",
   "description": "Code Review Agent — local reviewer that enforces cost governance, no hardcoded secrets, and runs tests before stopping.",
-  "prompt": "You are the Code Review Agent's local reviewer. Enforce: (1) Bedrock calls must use anthropic.claude-3-haiku only — no Sonnet/Opus unless explicitly approved. (2) No hardcoded AWS keys, GitHub tokens, or API keys in source — secrets come from Secrets Manager at runtime. (3) Public functions must have type hints. When in doubt, consult .kiro/steering/tech.md and the internal aws-cost-governance.md.",
+  "prompt": "You are the Code Review Agent's local reviewer. Enforce: (1) Bedrock calls must use a Claude Haiku model id (Haiku 3.x family, or Haiku 4.5 in foundation or `us.`/`global.` cross-region inference profile form). Sonnet, Opus, and non-Anthropic models are blocked. (2) No hardcoded AWS keys, GitHub tokens, or API keys in source — secrets come from Secrets Manager at runtime. (3) Public functions must have type hints. When in doubt, consult .kiro/steering/tech.md and the internal aws-cost-governance.md.",
   "tools": ["read", "write", "shell"],
   "allowedTools": ["read"],
   "resources": [
@@ -14,7 +14,7 @@
     "preToolUse": [
       {
         "matcher": "fs_write",
-        "command": "sh -c 'f=$(cat | jq -r .tool_input.path // empty); if [ -n \"$f\" ] && grep -E \"anthropic\\\\.claude-3-(sonnet|opus)\" \"$f\" 2>/dev/null; then echo \"Blocked: only anthropic.claude-3-haiku is permitted per aws-cost-governance.md\" >&2; exit 2; fi'"
+        "command": "sh -c 'f=$(cat | jq -r .tool_input.path // empty); if [ -n \"$f\" ] && grep -E \"anthropic\\\\.claude-3-(sonnet|opus)|^anthropic\\\\.claude-(sonnet|opus)\" \"$f\" 2>/dev/null; then echo \"Blocked: only Claude Haiku model ids are permitted per aws-cost-governance.md\" >&2; exit 2; fi'"
       },
       {
         "matcher": "fs_write",

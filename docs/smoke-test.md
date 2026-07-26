@@ -32,7 +32,7 @@ functional surface as step 4 with zero Docker dependency.
 export WEBHOOK_SECRET="local-dev-webhook-secret"
 export GITHUB_TOKEN="not-a-real-token-just-for-local-testing"
 export DIFF_CACHE_BUCKET="local-dev-cache-bucket"
-export BEDROCK_MODEL_ID="anthropic.claude-3-haiku-20240307"
+export BEDROCK_MODEL_ID="us.anthropic.claude-haiku-4-5-20251001-v1:0"
 
 .venv/bin/python -c "
 import json

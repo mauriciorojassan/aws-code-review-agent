@@ -9,7 +9,7 @@
 - **AWS SAM** — `template.yaml` defines: Lambda function, API Gateway HTTP API, S3 bucket for diff/analysis cache with 7-day lifecycle rule, Secrets Manager entry for the GitHub App token + webhook secret, CloudWatch alarm on Bedrock invocation count > 100/day.
 
 ## AI / Models
-- **Amazon Bedrock** — `anthropic.claude-3-haiku-20240307` (default). Model id is read from `BEDROCK_MODEL_ID` env var at call time; regex-gated to Claude Haiku family only (`^anthropic\.claude-3(-5|-7)?-haiku`). Sonnet, Opus, non-Anthropic, and ARN-embedded ids are rejected with `ValueError` before any Bedrock call.
+- **Amazon Bedrock** — `us.anthropic.claude-haiku-4-5-20251001-v1:0` (default; geographic cross-region inference profile). Model id is read from `BEDROCK_MODEL_ID` env var at call time; regex-gated to the Claude Haiku family only. Accepts Haiku 3.x (`anthropic.claude-3-haiku*`, `anthropic.claude-3-5-haiku*`, `anthropic.claude-3-7-haiku*`), Haiku 4.5 foundation (`anthropic.claude-haiku-4-5*`), and Haiku 4.5 inference profile ids (`us.anthropic.claude-haiku-4-5*`, `global.anthropic.claude-haiku-4-5*`). Sonnet, Opus, non-Anthropic, and ARN-embedded ids are rejected with `ValueError` before any Bedrock call. The Haiku 3.x family stays accepted for forward compatibility with accounts that still allow direct 3 Haiku invocation.
 - Prompt strategy: text response with an explicit JSON-array output contract in the system prompt. Response is parsed defensively — malformed shapes never propagate, individual invalid findings are skipped.
 - Bedrock client is configured with Lambda-safe timeouts (`connect_timeout=3`, `read_timeout=25`, `max_attempts=1`) so a hanging call surfaces as a catchable `ReadTimeoutError` before Lambda's 30-second ceiling.
 

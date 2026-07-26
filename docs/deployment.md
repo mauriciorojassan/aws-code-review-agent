@@ -34,10 +34,13 @@ Manager differs.
   ```
 - **Docker** — required only if you want to run [smoke-test.md Step 4](./smoke-test.md#step-4--sam-local-invoke-docker-required)
   before deploying. The deploy itself does not use Docker.
-- **Bedrock model access** in the target region for
-  `anthropic.claude-3-haiku-20240307`. Enable in the AWS console:
-  Bedrock → Model access → Manage model access → check "Claude 3 Haiku" → Save.
-  This can take a few minutes to activate.
+- **Bedrock model access** in the target region for Claude Haiku 4.5 (the new
+  default `us.anthropic.claude-haiku-4-5-20251001-v1:0` runs via the geographic
+  cross-region inference profile on most accounts — enable "Claude Haiku 4.5" in
+  the console). Enable in the AWS console: Bedrock → Model access → Manage model
+  access → check "Claude Haiku 4.5" → Save. This can take a few minutes to
+  activate. The Haiku 3.x family remains accepted too, so older accounts that
+  still have Claude 3 Haiku granted explicitly keep working.
 
 ## IAM permissions the deployer needs
 
@@ -416,10 +419,19 @@ The Lambda reads these at call time (not at import), so `sam local invoke
 | `GITHUB_TOKEN` | env (dev) → Secrets Manager `github_token` (prod) | Bearer token for GitHub API calls. |
 | `SECRETS_ARN` | template `!Ref GitHubSecrets` | Secrets Manager secret to read when env is absent. |
 | `DIFF_CACHE_BUCKET` | template `!Ref DiffCacheBucket` | S3 bucket for diff + analysis cache. |
-| `BEDROCK_MODEL_ID` | template hard-coded to Haiku | Only `anthropic.claude-3-haiku-*` accepted; other values fail-closed at review time. |
+| `BEDROCK_MODEL_ID` | template default inference profile id | Default is `us.anthropic.claude-haiku-4-5-20251001-v1:0` (Haiku 4.5 geographic cross-region inference profile). Accepted family: `anthropic.claude-3-haiku*`, `anthropic.claude-3-5-haiku*`, `anthropic.claude-3-7-haiku*`, `anthropic.claude-haiku-4-5*`, `us.anthropic.claude-haiku-4-5*`, `global.anthropic.claude-haiku-4-5*` (Haiku 3.0 / 3.5 / 3.7 / 4.5 foundation, plus Haiku 4.5 geographic and global inference profile ids). Other values fail-closed at review time. |
 | `METRICS_NAMESPACE` | (optional, defaults to `CodeReviewAgent`) | CloudWatch custom-metrics namespace. |
 
 `WEBHOOK_SECRET` and `GITHUB_TOKEN` env vars **win** over Secrets Manager
 when set — useful for local dev and for `sam local invoke`. Production
 deployments leave both unset in the environment; the handler reads from
 Secrets Manager only.
+
+Note on the default `BEDROCK_MODEL_ID`: `us.anthropic.claude-haiku-4-5-20251001-v1:0`
+is a geographic cross-region inference profile id — AWS auto-routes
+`InvokeModel` calls across `us-east-1`, `us-east-2`, and `us-west-2` based on
+regional capacity. The SAM template IAM policy grants `bedrock:InvokeModel` on
+the inference profile ARN (resolved via `!Sub` with `${AWS::Region}` and
+`${AWS::AccountId}`) plus the three regional foundation-model ARNs guarded by
+the `bedrock:InferenceProfileArn` condition, matching the AWS official
+Geographic cross-region inference policy pattern.

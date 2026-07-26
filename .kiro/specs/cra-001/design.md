@@ -60,7 +60,7 @@ Transient failures (GitHub API errors, Bedrock timeouts) return non-2xx status c
 6. Fetch complete diff from GitHub API via MCP or direct call. Retry once on transient failure. Hard failure → 502.
 7. Cache raw diff in S3 `diffs/{repo}/{pr}/{head_sha}.diff`.
 8. Apply eligibility filter (denylist + binary detection). If >50 eligible files → post neutral "too large" comment, return 200 no-op. If 0 files → post neutral "no changes" comment, return 200 no-op.
-9. Send eligible diff to Bedrock. Read model ID from `BEDROCK_MODEL_ID` env var (default: `anthropic.claude-3-haiku-20240307`). Reject non-Haiku models before invocation. Bedrock timeout/error → log, 500.
+9. Send eligible diff to Bedrock. Read model ID from `BEDROCK_MODEL_ID` env var (default: `us.anthropic.claude-haiku-4-5-20251001-v1:0`, a geographic cross-region inference profile — AWS auto-routes the call across US regions). Reject non-Haiku models before invocation. Bedrock timeout/error → log, 500.
 10. Parse Bedrock response into `Finding` objects. Drop findings with `line < 1`.
 11. Validate remaining findings against parsed unified diff hunks. File must exist in eligible diff; line must fall within a `+` hunk on the right side. If any valid finding remains out-of-hunk → log structured failure, return 200 (data quality issue, not transient).
 12. Cache validated findings in S3 `analyses/{repo}/{pr}/{head_sha}.json`.
@@ -72,7 +72,7 @@ Transient failures (GitHub API errors, Bedrock timeouts) return non-2xx status c
 **Environment variables:**
 - `DIFF_CACHE_BUCKET` — S3 bucket name (required).
 - `SECRETS_ARN` — Secrets Manager ARN for GitHub credentials (required).
-- `BEDROCK_MODEL_ID` — Bedrock model identifier (default: `anthropic.claude-3-haiku-20240307`).
+- `BEDROCK_MODEL_ID` — Bedrock model identifier (default: `us.anthropic.claude-haiku-4-5-20251001-v1:0`).
 
 ### 2. Webhook Validator (`webhook_validator.py`)
 **Functions:**
@@ -148,10 +148,10 @@ class HunkRange:
 
 ### 6. Reviewer (`reviewer.py`)
 **Function:**
-- `analyze_diff(diff: str, model_id: str = "anthropic.claude-3-haiku-20240307") -> list[Finding]`
+- `analyze_diff(diff: str, model_id: str = "us.anthropic.claude-haiku-4-5-20251001-v1:0") -> list[Finding]`
 
 **Logic:**
-1. Reject if `model_id` does not match `anthropic.claude-3-haiku*`. Raise `ValueError` with message stating only Haiku is permitted.
+1. Reject if `model_id` does not match the Claude Haiku family. Accepted: Haiku 3.x (`anthropic.claude-3-haiku*`, `anthropic.claude-3-5-haiku*`, `anthropic.claude-3-7-haiku*`), Haiku 4.5 foundation (`anthropic.claude-haiku-4-5*`), and Haiku 4.5 cross-region inference profiles (`us.anthropic.claude-haiku-4-5*`, `global.anthropic.claude-haiku-4-5*`). Raise `ValueError` with message stating only Haiku is permitted (Haiku-only stays the cost-governance rule; the 4.5 family + inference profile ids were added when AWS gated Claude 3 Haiku as LEGACY in some accounts).
 2. Build structured prompt with system message defining the reviewer persona and JSON output schema.
 3. Invoke Bedrock `invoke_model` with `max_tokens=4096`.
 4. Parse response `content[0].text` as JSON.
@@ -301,7 +301,7 @@ class ReviewResult(BaseModel):
 ## Cost Controls
 
 - **Cache-first architecture:** Check S3 analysis cache before invoking Bedrock. Duplicate `{repo}/{pr}/{head_sha}` analyses are never re-invoked.
-- **Model enforcement:** Read `BEDROCK_MODEL_ID` from environment (default: `anthropic.claude-3-haiku-20240307`). Reject non-Haiku models at runtime before invocation. This allows operator override for approved model updates while maintaining cost governance by default.
+- **Model enforcement:** Read `BEDROCK_MODEL_ID` from environment (default: `us.anthropic.claude-haiku-4-5-20251001-v1:0`, a geographic cross-region inference profile — AWS auto-routes the call across `us-east-1` / `us-east-2` / `us-west-2`). Reject non-Haiku models at runtime before invocation. This allows operator override for approved model updates while maintaining cost governance by default.
 - **Eligibility filtering:** Denylist excludes lock files, minified files, and binaries from the Bedrock prompt, reducing token cost without losing the complete diff cache.
 - **Reviewability gate:** PRs with >50 eligible files skip Bedrock entirely, posting a neutral comment instead.
 - **S3 lifecycle policy:** Automatic 7-day expiry on all cached objects.

@@ -62,8 +62,8 @@ Each AC is independently testable. The word `SHALL` is normative; `SHALL NOT` is
 **So that** I can address issues quickly without guessing or receiving invalid comments.
 
 **Acceptance Criteria:**
-- [ ] WHEN the eligible diff is ready for analysis, THE SYSTEM SHALL invoke Amazon Bedrock with the model identifier resolved from the `BEDROCK_MODEL_ID` environment variable, defaulting to `anthropic.claude-3-haiku-20240307` when unset.
-- [ ] IF the resolved model identifier does not match the Claude Haiku family (any of `anthropic.claude-3-haiku*`, `anthropic.claude-3-5-haiku*`, `anthropic.claude-3-7-haiku*`), THEN THE SYSTEM SHALL raise `ValueError` before invoking Bedrock.
+- [ ] WHEN the eligible diff is ready for analysis, THE SYSTEM SHALL invoke Amazon Bedrock with the model identifier resolved from the `BEDROCK_MODEL_ID` environment variable, defaulting to `us.anthropic.claude-haiku-4-5-20251001-v1:0` when unset.
+- [ ] IF the resolved model identifier does not match the Claude Haiku family (any of `anthropic.claude-3-haiku*`, `anthropic.claude-3-5-haiku*`, `anthropic.claude-3-7-haiku*`, `anthropic.claude-haiku-4-5*`, `us.anthropic.claude-haiku-4-5*`, `global.anthropic.claude-haiku-4-5*`), THEN THE SYSTEM SHALL raise `ValueError` before invoking Bedrock.
 - [ ] IF the resolved model identifier is empty, whitespace-only, or `None`, THEN THE SYSTEM SHALL raise `ValueError` before invoking Bedrock.
 - [ ] IF the eligible diff exceeds the configured Bedrock context limit, THEN THE SYSTEM SHALL truncate at hunk boundaries to the first 100 eligible hunks AND SHALL add a machine-readable truncation note to both the analysis input and the review summary.
 - [ ] THE SYSTEM SHALL parse Bedrock responses into a list of findings, each containing `file` (string), `line` (integer), `severity` (`error` | `warning` | `info`), `message` (string), and optional `suggestion` (string or null).

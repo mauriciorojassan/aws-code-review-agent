@@ -1,66 +1,80 @@
-# Code Review Agent 🤖
+# Code Review Agent
 
 [![CI](https://github.com/mauriciorojassan/aws-code-review-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/mauriciorojassan/aws-code-review-agent/actions/workflows/ci.yml)
 
-Automated GitHub PR reviewer powered by Amazon Bedrock (Claude 3 Haiku).
+Automated GitHub PR reviewer on AWS: webhook in → Bedrock analysis → inline review comments out.
 
-## What it does
+Built with **Kiro** + **AWS SAM** for the Código Facilito × AWS hackathon.
 
-1. Receives GitHub PR webhooks (`pull_request` events: `opened`, `synchronize`, `reopened`).
-2. Fetches the diff via the GitHub REST API.
-3. Analyzes changes with Bedrock Claude Haiku 4.5 via the geographic cross-region inference profile `us.anthropic.claude-haiku-4-5-20251001-v1:0` (AWS auto-routes across US regions).
-4. Posts a summary + inline review comments back to the PR.
+## Live demo
 
-## Architecture
+Open this PR and scroll the bot review + inline comments:
+
+**https://github.com/mauriciorojassan/cra-demo-target/pull/1**
+
+The bot caught SQL injection, off-by-one, mutable defaults, and bare `except` on a deliberately buggy sample service.
+
+## Problem → solution
+
+| Pain | What this does |
+|------|----------------|
+| Small teams wait hours for a first human review | Posts a structured first-pass in ~10–15s after PR open/update |
+| Review quality depends on who is online | Same Haiku-backed checklist every time |
+| LLM cost and blast radius | Haiku-only gate, S3 analysis cache, >50-file skip, CloudWatch alarm |
+
+## How it works
 
 ```
-GitHub → API Gateway HTTP API v2 → Lambda → Bedrock (Haiku)
-                                       ↕
-                                   S3 (diff + analysis cache)
-                                   Secrets Manager (webhook secret + token)
+GitHub PR webhook
+    → API Gateway HTTP API v2
+    → Lambda (Python 3.12, arm64)
+         → validate HMAC (webhook secret)
+         → fetch diff (GitHub REST)
+         → filter noise (locks, binaries, denylist)
+         → Bedrock Claude Haiku 4.5 (cross-region inference profile)
+         → post summary + inline comments
+    ↔ S3 (diff + analysis cache, 7-day lifecycle)
+    ↔ Secrets Manager (webhook secret + GitHub token)
 ```
 
-## Quick Start
+## Stack
+
+| Layer | Choice |
+|-------|--------|
+| Compute | AWS Lambda + SAM |
+| HTTP | API Gateway HTTP API v2 |
+| Model | Amazon Bedrock — Claude Haiku 4.5 (`us.anthropic.claude-haiku-4-5-20251001-v1:0`) |
+| Cache | S3 |
+| Secrets | Secrets Manager |
+| Auth to GitHub | Fine-grained PAT or GitHub App installation token |
+| Quality | 313 tests, ~100% `src` coverage, ruff + black + `sam validate` in CI |
+
+## Quick start (local)
 
 ```bash
-# 1. Install project + dev dependencies (editable)
 pip install -e ".[dev]"
-
-# 2. Run the local gate — same bundle CI runs
-pytest --cov=code_review_agent --cov-fail-under=98
+pytest --cov=code_review_agent --cov-fail-under=99
 ruff check src/ tests/ mcp_server/
 black --check src/ tests/ mcp_server/
 sam validate --lint
 ```
 
-### Smoke-test the handler locally
+- Local handler smoke: [`docs/smoke-test.md`](docs/smoke-test.md)
+- Deploy runbook (PAT + GitHub App paths): [`docs/deployment.md`](docs/deployment.md)
 
-See [`docs/smoke-test.md`](docs/smoke-test.md) — direct-Python invocation,
-`sam build`, and `sam local invoke` walkthrough with a documented Docker
-API-drift caveat.
+## Deploy (short path)
 
-### Deploy to AWS
+```bash
+sam build && sam deploy --guided   # stack outputs WebhookUrl
+# put webhook_secret + github_token into Secrets Manager
+# add repo webhook → WebhookUrl, events: pull_request only
+```
 
-See [`docs/deployment.md`](docs/deployment.md) — `sam deploy --guided`
-walkthrough with parallel Personal Access Token (simple) and GitHub App
-(organization-scoped) auth paths.
+Designed to stay under **~$3/month** at typical PR volume (Haiku-only + cache + alarm).
 
-## Project Structure
+## Project layout
 
-See [`.kiro/steering/structure.md`](.kiro/steering/structure.md) for the full
-layout.
-
-## Cost Governance
-
-Designed to stay under $3/month at typical PR volumes. See
-[`.kiro/steering/aws-cost-governance.md`](.kiro/steering/aws-cost-governance.md)
-for the cost model (local-only, gitignored).
-
-## MCP Server (optional / future)
-
-`mcp_server/` contains a scaffold for exposing the PR-review tooling over the
-Model Context Protocol. Not required for the Lambda flow above; see
-`.kiro/specs/cra-001/tasks.md` Wave 5 for status.
+See [`.kiro/steering/structure.md`](.kiro/steering/structure.md).
 
 ## License
 

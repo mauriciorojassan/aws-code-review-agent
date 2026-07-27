@@ -354,6 +354,31 @@ def test_parse_empty_array(stub_client: MagicMock) -> None:
     assert findings == []
 
 
+def test_parse_markdown_fenced_json_array(stub_client: MagicMock) -> None:
+    """Haiku 4.5 wraps JSON arrays in ```json fences; strip and parse."""
+    findings_json = json.dumps(
+        [
+            {
+                "file": "src/main.py",
+                "line": 3,
+                "severity": "error",
+                "message": "sql injection",
+                "suggestion": "use parameters",
+            }
+        ]
+    )
+    fenced = f"```json\n{findings_json}\n```"
+    stub_client.invoke_model.return_value = {
+        "body": _fake_body({"content": [{"text": fenced}]})
+    }
+
+    findings = reviewer.analyze_diff("diff", model_id=_HAIKU_DEFAULT)
+
+    assert len(findings) == 1
+    assert findings[0].file == "src/main.py"
+    assert findings[0].severity == "error"
+
+
 # ---------------------------------------------------------------------------
 # Response parsing — robustness (business rule 4)
 # ---------------------------------------------------------------------------

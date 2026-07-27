@@ -189,6 +189,29 @@ def _build_review_prompt(diff: str) -> str:
     return f"Review this pull request diff and provide findings:\n\n```diff\n{diff}\n```"
 
 
+def _extract_json_payload(text: str) -> str:
+    """Strip optional markdown fences from a model text payload.
+
+    Haiku 4.5 (and other chat models) often wrap JSON arrays in
+    ```` ```json ... ``` ```` even when the system prompt asks for bare
+    JSON. Strip a single leading/trailing fence pair so ``json.loads``
+    sees the array. Leaves bare JSON untouched.
+    """
+    stripped = text.strip()
+    if not stripped.startswith("```"):
+        return stripped
+    # Drop opening fence line (``` or ```json / ```JSON)
+    rest = stripped.split("\n", 1)
+    if len(rest) < 2:
+        return stripped
+    body = rest[1]
+    # Drop closing fence if present
+    close = body.rfind("```")
+    if close != -1:
+        body = body[:close]
+    return body.strip()
+
+
 def _parse_findings(response_body: Any) -> list[Finding]:
     """Parse a Bedrock response body into :class:`Finding` objects.
 
@@ -202,7 +225,7 @@ def _parse_findings(response_body: Any) -> list[Finding]:
       * Missing / empty / non-list ``content``.
       * ``content[0]`` is not an object.
       * Missing / non-string / empty ``content[0].text``.
-      * ``text`` is not valid JSON.
+      * ``text`` is not valid JSON (after optional markdown-fence strip).
       * Parsed JSON is not an array.
       * Individual elements are not dicts or fail :class:`Finding` validation.
     """
@@ -229,7 +252,7 @@ def _parse_findings(response_body: Any) -> list[Finding]:
         return []
 
     try:
-        parsed = json.loads(text)
+        parsed = json.loads(_extract_json_payload(text))
     except json.JSONDecodeError as e:
         logger.warning("Bedrock response text is not valid JSON: %s", e)
         return []

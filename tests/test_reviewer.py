@@ -368,9 +368,7 @@ def test_parse_markdown_fenced_json_array(stub_client: MagicMock) -> None:
         ]
     )
     fenced = f"```json\n{findings_json}\n```"
-    stub_client.invoke_model.return_value = {
-        "body": _fake_body({"content": [{"text": fenced}]})
-    }
+    stub_client.invoke_model.return_value = {"body": _fake_body({"content": [{"text": fenced}]})}
 
     findings = reviewer.analyze_diff("diff", model_id=_HAIKU_DEFAULT)
 

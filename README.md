@@ -72,10 +72,6 @@ sam build && sam deploy --guided   # stack outputs WebhookUrl
 
 Designed to stay under **~$3/month** at typical PR volume (Haiku-only + cache + alarm).
 
-## Project layout
-
-See [`.kiro/steering/structure.md`](.kiro/steering/structure.md).
-
 ## License
 
 MIT

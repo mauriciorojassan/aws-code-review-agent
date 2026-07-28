@@ -403,8 +403,7 @@ installation-token exchange **inside** the Lambda:
 - Falls back to `github_token` from Secrets Manager if the App credentials
   are not configured — preserving Path A compatibility.
 
-Not implemented in v1. Track under the follow-up wave in
-`.kiro/specs/cra-001/tasks.md`.
+Not implemented in v1.
 
 ---
 

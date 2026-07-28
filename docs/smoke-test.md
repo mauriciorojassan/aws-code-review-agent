@@ -1,8 +1,7 @@
 # Smoke Test Runbook
 
-Manual verification steps for the Lambda handler orchestration. This runbook covers
-what is exercised by **T4.4** in `.kiro/specs/cra-001/tasks.md`: prove the packaged
-handler executes end-to-end against a realistic API Gateway event.
+Manual verification steps for the Lambda handler orchestration. This runbook proves
+the packaged handler executes end-to-end against a realistic API Gateway event.
 
 ## Prerequisites
 

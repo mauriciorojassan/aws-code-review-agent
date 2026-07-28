@@ -39,5 +39,5 @@ Thumbs.db
 *.pem
 *.key
 
-# Internal-only steering (not committed)
-.kiro/steering/aws-cost-governance.md
+# Internal-only planning artifacts (not committed)
+.kiro/

@@ -1,55 +1,20 @@
-# Code Review Agent
+# AWS Code Review Agent
 
 [![CI](https://github.com/mauriciorojassan/aws-code-review-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/mauriciorojassan/aws-code-review-agent/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Open in Codespaces](https://img.shields.io/badge/Open%20in-Codespaces-black?logo=github)](https://github.com/codespaces/new?repo=mauriciorojassan/aws-code-review-agent&ref=main)
 
-Automated GitHub PR reviewer on AWS: webhook in → Bedrock analysis → inline review comments out.
+> Self-hosted GitHub bot that reviews pull-request diffs using AWS Bedrock, with data residency and anti-hallucination guards.
 
-Built with **Kiro** + **AWS SAM** for the Código Facilito × AWS hackathon.
+## Quick Start
 
-## Live demo
+### Prerequisites
 
-Open this PR and scroll the bot review + inline comments:
+- Python 3.12+
+- AWS account with Bedrock access
+- GitHub PAT or App installation token
 
-**https://github.com/mauriciorojassan/cra-demo-target/pull/1**
-
-The bot caught SQL injection, off-by-one, mutable defaults, and bare `except` on a deliberately buggy sample service.
-
-## Problem → solution
-
-| Pain | What this does |
-|------|----------------|
-| Small teams wait hours for a first human review | Posts a structured first-pass in ~10–15s after PR open/update |
-| Review quality depends on who is online | Same Haiku-backed checklist every time |
-| LLM cost and blast radius | Haiku-only gate, S3 analysis cache, >50-file skip, CloudWatch alarm |
-
-## How it works
-
-```
-GitHub PR webhook
-    → API Gateway HTTP API v2
-    → Lambda (Python 3.12, arm64)
-         → validate HMAC (webhook secret)
-         → fetch diff (GitHub REST)
-         → filter noise (locks, binaries, denylist)
-         → Bedrock Claude Haiku 4.5 (cross-region inference profile)
-         → post summary + inline comments
-    ↔ S3 (diff + analysis cache, 7-day lifecycle)
-    ↔ Secrets Manager (webhook secret + GitHub token)
-```
-
-## Stack
-
-| Layer | Choice |
-|-------|--------|
-| Compute | AWS Lambda + SAM |
-| HTTP | API Gateway HTTP API v2 |
-| Model | Amazon Bedrock — Claude Haiku 4.5 (`us.anthropic.claude-haiku-4-5-20251001-v1:0`) |
-| Cache | S3 |
-| Secrets | Secrets Manager |
-| Auth to GitHub | Fine-grained PAT or GitHub App installation token |
-| Quality | 313 tests, ~100% `src` coverage, ruff + black + `sam validate` in CI |
-
-## Quick start (local)
+### Install and run
 
 ```bash
 pip install -e ".[dev]"
@@ -59,18 +24,31 @@ black --check src/ tests/ mcp_server/
 sam validate --lint
 ```
 
-- Local handler smoke: [`docs/smoke-test.md`](docs/smoke-test.md)
-- Deploy runbook (PAT + GitHub App paths): [`docs/deployment.md`](docs/deployment.md)
-
-## Deploy (short path)
+Deploy:
 
 ```bash
-sam build && sam deploy --guided   # stack outputs WebhookUrl
-# put webhook_secret + github_token into Secrets Manager
-# add repo webhook → WebhookUrl, events: pull_request only
+sam build && sam deploy --guided
+# Add the webhook URL to the repo with pull_request events.
 ```
 
-Designed to stay under **~$3/month** at typical PR volume (Haiku-only + cache + alarm).
+## Architecture
+
+A serverless GitHub webhook consumer built on AWS SAM. API Gateway forwards `pull_request` events to a Lambda that validates the HMAC signature, fetches the diff, filters noise, sends chunks to Amazon Bedrock Claude Haiku, and posts summary and inline comments back to GitHub.
+
+Diffs and analyses are cached in S3 with a 7-day lifecycle to avoid re-processing and to keep costs low. Secrets live in AWS Secrets Manager.
+
+See [`docs/adr/001-initial-architecture.md`](docs/adr/001-initial-architecture.md) for the primary architectural decision and trade-offs.
+
+## Tech Stack
+
+| Layer | Choice |
+|-------|--------|
+| Compute | AWS Lambda + SAM |
+| HTTP | API Gateway HTTP API v2 |
+| Model | Amazon Bedrock — Claude Haiku 4.5 |
+| Cache | S3 with lifecycle policy |
+| Secrets | AWS Secrets Manager |
+| Quality | pytest, ruff, black, `sam validate` |
 
 ## License
 
